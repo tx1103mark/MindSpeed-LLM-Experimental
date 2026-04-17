@@ -16,6 +16,7 @@
 import math
 from typing import Any, Dict, Optional, Tuple
 from torch import Tensor
+from torch import nn
 
 from megatron.core import tensor_parallel
 from megatron.core.transformer.transformer_layer import TransformerLayerSubmodules
@@ -60,6 +61,13 @@ class TransformerLayer(MegatronTransformerLayer):
         if args.mtp_num_layers and hasattr(self.self_attention, "core_attention"):
             self.mtp_idx = 0
             self.self_attention.core_attention.mtp_idx = 0
+
+        self.hidden_size_per_layer_input = int(getattr(config, "hidden_size_per_layer_input", 0) or 0)
+        if self.hidden_size_per_layer_input > 0:
+            self.ple_act = nn.GELU()
+            self.per_layer_input_gate = nn.Linear(self.config.hidden_size, self.hidden_size_per_layer_input, bias=False)
+            self.per_layer_projection = nn.Linear(self.hidden_size_per_layer_input, self.config.hidden_size, bias=False)
+            self.post_per_layer_input_norm = nn.LayerNorm(self.config.hidden_size, eps=self.config.layernorm_epsilon)
 
     def _forward_attention(
         self,
@@ -224,3 +232,18 @@ class TransformerLayer(MegatronTransformerLayer):
         )
 
         return output
+
+    def apply_per_layer_input(self, hidden_states: Tensor, per_layer_input: Optional[Tensor]) -> Tensor:
+        """Inject per-layer embedding signal after the base transformer layer output."""
+        if self.hidden_size_per_layer_input <= 0:
+            return hidden_states
+        if per_layer_input is None:
+            raise RuntimeError(f"PLE enabled but per_layer_input is None at layer {self.layer_number}.")
+
+        residual = hidden_states
+        gate = self.ple_act(self.per_layer_input_gate(hidden_states))
+        hidden_states = gate * per_layer_input
+        hidden_states = self.per_layer_projection(hidden_states)
+        hidden_states = self.post_per_layer_input_norm(hidden_states)
+        hidden_states = residual + hidden_states
+        return hidden_states

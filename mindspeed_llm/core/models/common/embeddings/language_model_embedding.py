@@ -67,3 +67,19 @@ def language_model_embedding_init_func(
 
     # Embeddings dropout
     self.embedding_dropout = torch.nn.Dropout(self.config.hidden_dropout)
+
+    # Per-Layer Embeddings (PLE): packed table [vocab_size_per_layer_input, num_layers * per_layer_dim].
+    self.hidden_size_per_layer_input = int(getattr(self.config, "hidden_size_per_layer_input", 0) or 0)
+    if self.hidden_size_per_layer_input > 0:
+        vocab_size_per_layer_input = int(
+            getattr(self.config, "vocab_size_per_layer_input", self.vocab_size) or self.vocab_size
+        )
+        self.embed_tokens_per_layer = torch.nn.Embedding(
+            vocab_size_per_layer_input,
+            self.config.num_layers * self.hidden_size_per_layer_input,
+            padding_idx=None,
+        )
+        if self.config.perform_initialization:
+            self.config.init_method(self.embed_tokens_per_layer.weight)
+    else:
+        self.embed_tokens_per_layer = None

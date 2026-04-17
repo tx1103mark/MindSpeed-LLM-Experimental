@@ -79,4 +79,10 @@ def transformer_config_post_init_wrapper(fn):
         for key, value in vars(args).items():
             if not hasattr(self, key):
                 setattr(self, key, value)
+
+        # Backward-compatible defaults for Gemma4-style Per-Layer Embeddings (PLE).
+        if not hasattr(self, "vocab_size_per_layer_input"):
+            setattr(self, "vocab_size_per_layer_input", getattr(self, "vocab_size", 0))
+        if not hasattr(self, "hidden_size_per_layer_input"):
+            setattr(self, "hidden_size_per_layer_input", 0)
     return wrapper

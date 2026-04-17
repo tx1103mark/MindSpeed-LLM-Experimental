@@ -183,6 +183,31 @@ class ModelBase(abc.ABC):
             self.set_embedding_word_embeddings_norm_weight(data=embd_norm_weight)
             self.set_embedding_word_embeddings_norm_bias(data=embd_norm_bias)
 
+        # Gemma4-style PLE optional embedding table.
+        if hasattr(src_model, "has_embedding_word_embeddings_per_layer_module") and \
+            hasattr(self, "has_embedding_word_embeddings_per_layer_module") and \
+            src_model.has_embedding_word_embeddings_per_layer_module() and self.has_embedding_word_embeddings_per_layer_module():
+            ple_embed_weight = src_model.get_embedding_word_embeddings_per_layer_weight()
+            if ple_embed_weight.size(0) > self.get_embedding_word_embeddings_per_layer_weight().size(0):
+                logger.info(f"Source PLE embedding size: {ple_embed_weight.size()} "
+                            f"Target PLE embedding size: {self.get_embedding_word_embeddings_per_layer_weight().size()}")
+                ple_embed_weight = ple_embed_weight[:self.get_embedding_word_embeddings_per_layer_weight().size(0), :]
+            self.set_embedding_word_embeddings_per_layer_weight(data=ple_embed_weight)
+
+        if hasattr(src_model, "has_embedding_per_layer_model_projection_module") and \
+            hasattr(self, "has_embedding_per_layer_model_projection_module") and \
+            src_model.has_embedding_per_layer_model_projection_module() and self.has_embedding_per_layer_model_projection_module():
+            self.set_embedding_per_layer_model_projection_weight(
+                data=src_model.get_embedding_per_layer_model_projection_weight()
+            )
+
+        if hasattr(src_model, "has_embedding_per_layer_projection_norm_module") and \
+            hasattr(self, "has_embedding_per_layer_projection_norm_module") and \
+            src_model.has_embedding_per_layer_projection_norm_module() and self.has_embedding_per_layer_projection_norm_module():
+            self.set_embedding_per_layer_projection_norm_weight(
+                data=src_model.get_embedding_per_layer_projection_norm_weight()
+            )
+
     def set_postprocess_state(self, src_model):
         final_layernorm_weight = src_model.get_final_layernorm_weight()
         self.set_final_layernorm_weight(data=final_layernorm_weight)
@@ -241,6 +266,34 @@ class ModelBase(abc.ABC):
         if self.has_layers_self_attention_pre_mlp_layernorm_bias(layer_idx=src_layer_idx):
             pre_mlp_layernorm_bias = src_model.get_layers_self_attention_pre_mlp_layernorm_bias(layer_idx=src_layer_idx)
             self.set_layers_self_attention_pre_mlp_layernorm_bias(layer_idx=dst_layer_idx, data=pre_mlp_layernorm_bias)
+
+        # Gemma4-style PLE per-layer injection branch (optional).
+        if hasattr(src_model, "has_layers_per_layer_input_gate_module") and \
+            hasattr(self, "has_layers_per_layer_input_gate_module") and \
+            src_model.has_layers_per_layer_input_gate_module(layer_idx=src_layer_idx) and \
+            self.has_layers_per_layer_input_gate_module(layer_idx=dst_layer_idx):
+            self.set_layers_per_layer_input_gate_weight(
+                layer_idx=dst_layer_idx,
+                data=src_model.get_layers_per_layer_input_gate_weight(layer_idx=src_layer_idx),
+            )
+
+        if hasattr(src_model, "has_layers_per_layer_projection_module") and \
+            hasattr(self, "has_layers_per_layer_projection_module") and \
+            src_model.has_layers_per_layer_projection_module(layer_idx=src_layer_idx) and \
+            self.has_layers_per_layer_projection_module(layer_idx=dst_layer_idx):
+            self.set_layers_per_layer_projection_weight(
+                layer_idx=dst_layer_idx,
+                data=src_model.get_layers_per_layer_projection_weight(layer_idx=src_layer_idx),
+            )
+
+        if hasattr(src_model, "has_layers_post_per_layer_input_norm_module") and \
+            hasattr(self, "has_layers_post_per_layer_input_norm_module") and \
+            src_model.has_layers_post_per_layer_input_norm_module(layer_idx=src_layer_idx) and \
+            self.has_layers_post_per_layer_input_norm_module(layer_idx=dst_layer_idx):
+            self.set_layers_post_per_layer_input_norm_weight(
+                layer_idx=dst_layer_idx,
+                data=src_model.get_layers_post_per_layer_input_norm_weight(layer_idx=src_layer_idx),
+            )
 
     def set_attn_state(self, src_layer_idx, dst_layer_idx, src_model):
         """Set self-attention params."""
@@ -1432,6 +1485,9 @@ class MegatronMCoreModel(MegatronModel):
             "embedding_word_embeddings": "embedding.word_embeddings",
             "embedding_word_embeddings_norm": "embedding.word_embeddings.norm",
             "embedding_position_embeddings": "embedding.position_embeddings",
+            "embedding_word_embeddings_per_layer": "embedding.embed_tokens_per_layer",
+            "embedding_per_layer_model_projection": "per_layer_model_projection",
+            "embedding_per_layer_projection_norm": "per_layer_projection_norm",
             "model": "module",
             "layers_input_layernorm": module_layer + "input_layernorm",
             "layers": "decoder.layers",
@@ -1443,6 +1499,9 @@ class MegatronMCoreModel(MegatronModel):
             "layers_self_attention_pre_mlp_layernorm": module_layer + "pre_mlp_layernorm",
             "layers_mlp_linear_fc1": module_layer + "mlp.linear_fc1",
             "layers_mlp_linear_fc2": module_layer + "mlp.linear_fc2",
+            "layers_per_layer_input_gate": module_layer + "per_layer_input_gate",
+            "layers_per_layer_projection": module_layer + "per_layer_projection",
+            "layers_post_per_layer_input_norm": module_layer + "post_per_layer_input_norm",
             "layers_self_attention_post_mlp_layernorm": module_layer + "post_mlp_layernorm",
             "final_layernorm": "decoder.final_layernorm",
             "output_layer": "output_layer"

@@ -6,6 +6,7 @@ from functools import wraps
 
 import torch
 from torch import Tensor
+from torch import nn
 import torch.nn.functional as F
 
 from megatron.core import InferenceParams, tensor_parallel
@@ -128,6 +129,22 @@ class GPTModel(MegatronCoreGPTModel):
             post_process=self.post_process,
         )
 
+        # Per-Layer Embeddings (PLE) model-side projection branch.
+        self.hidden_size_per_layer_input = int(getattr(self.config, "hidden_size_per_layer_input", 0) or 0)
+        self.use_ple = self.hidden_size_per_layer_input > 0
+        if self.use_ple:
+            self.per_layer_model_projection = nn.Linear(
+                self.config.hidden_size,
+                self.config.num_layers * self.hidden_size_per_layer_input,
+                bias=False,
+            )
+            self.per_layer_projection_norm = nn.LayerNorm(
+                self.hidden_size_per_layer_input,
+                eps=self.config.layernorm_epsilon,
+            )
+            self.per_layer_model_projection_scale = self.config.hidden_size ** -0.5
+            self.per_layer_input_scale = 2.0 ** -0.5
+
         if self.mtp_process:
             self.mtp = MultiTokenPredictionBlock(config=self.config, spec=self.mtp_block_spec)
 
@@ -226,6 +243,31 @@ class GPTModel(MegatronCoreGPTModel):
             # decoder will get hidden_states from encoder.input_tensor
             decoder_input = None
 
+        per_layer_inputs = None
+        if self.use_ple and self.pre_process:
+            if self.embedding.embed_tokens_per_layer is None:
+                raise RuntimeError("PLE enabled but embedding.embed_tokens_per_layer is missing.")
+
+            # token-identity component: [b, s, L*P] -> [s, b, L, P]
+            ple_token = self.embedding.embed_tokens_per_layer(input_ids).view(
+                input_ids.shape[0],
+                input_ids.shape[1],
+                self.config.num_layers,
+                self.hidden_size_per_layer_input,
+            ).permute(1, 0, 2, 3).contiguous()
+
+            # context-aware component: [s, b, h] -> [s, b, L, P]
+            ple_context = self.per_layer_model_projection(decoder_input) * self.per_layer_model_projection_scale
+            ple_context = ple_context.view(
+                decoder_input.shape[0],
+                decoder_input.shape[1],
+                self.config.num_layers,
+                self.hidden_size_per_layer_input,
+            )
+            ple_context = self.per_layer_projection_norm(ple_context)
+
+            per_layer_inputs = (ple_token + ple_context) * self.per_layer_input_scale
+
         # Rotary positional embeddings (embedding is None for PP intermediate devices)
         rotary_pos_emb = None
         if self.position_embedding_type == 'rope':
@@ -243,6 +285,7 @@ class GPTModel(MegatronCoreGPTModel):
             inference_context=inference_context,
             rotary_pos_emb=rotary_pos_emb,
             packed_seq_params=packed_seq_params,
+            per_layer_inputs=per_layer_inputs,
             **(extra_block_kwargs or {}),
         )
 
