@@ -14,5 +14,7 @@ python convert_ckpt.py \
     --spec mindspeed_llm.tasks.models.spec.qwen3_spec layer_spec \
     --target-tensor-parallel-size 1 \
     --target-pipeline-parallel-size 1 \
+    --hidden-size-per-layer-input 256 \
+    --vocab-size-per-layer-input 151936 \
     --load-dir ./model_weights/qwen3_ple_mcore/ \
     --save-dir ./model_from_hf/qwen3_ple_hf/

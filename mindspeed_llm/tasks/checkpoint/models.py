@@ -1178,6 +1178,10 @@ class MegatronModel(ModelBase):
         self.args.spec = self.args_cmd.spec
         self.args.save_lora_to_hf = self.args_cmd.save_lora_to_hf
         self.args.load_checkpoint_loosely = self.args_cmd.load_checkpoint_loosely
+        self.args.hidden_size_per_layer_input = getattr(self.args_cmd, 'hidden_size_per_layer_input', 0) or 0
+        self.args.vocab_size_per_layer_input = getattr(self.args_cmd, 'vocab_size_per_layer_input', None)
+        if self.args.vocab_size_per_layer_input is None:
+            self.args.vocab_size_per_layer_input = getattr(self.args, 'vocab_size', None)
         self.args.tokenizer_model = getattr(self.args_cmd, 'tokenizer_model', None)
         self.args.make_vocab_size_divisible_by = getattr(self.args_cmd, 'make_vocab_size_divisible_by', None)
         if self.args_cmd.params_dtype == 'bf16':

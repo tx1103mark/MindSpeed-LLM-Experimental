@@ -58,6 +58,10 @@ def add_arguments(parser):
     group.add_argument("--noop-layers", type=str, default=None, help='Specity the noop layers.')
     group.add_argument("--add-output-layer-bias", action="store_true", default=False,
                        help='Configuration for the output layer bias.')
+    group.add_argument('--hidden-size-per-layer-input', type=int, default=0,
+                       help='Per-layer embedding hidden size (PLE). 0 disables PLE.')
+    group.add_argument('--vocab-size-per-layer-input', type=int, default=None,
+                       help='Vocabulary size for per-layer embeddings (PLE). Defaults to vocab size when unset.')
 
 
 def build_metadata(args, margs):
