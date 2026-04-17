@@ -6,6 +6,21 @@ class LanguageModelEmbeddingFeature(MindSpeedFeature):
     def __init__(self):
         super(LanguageModelEmbeddingFeature, self).__init__(feature_name="language-model-embedding", optimization_level=0)
 
+    def register_args(self, parser: ArgumentParser):
+        group = parser.add_argument_group(title=self.feature_name)
+        group.add_argument(
+            "--hidden-size-per-layer-input",
+            type=int,
+            default=0,
+            help="Per-layer embedding hidden size (PLE). 0 disables PLE.",
+        )
+        group.add_argument(
+            "--vocab-size-per-layer-input",
+            type=int,
+            default=None,
+            help="Vocabulary size for per-layer embeddings (PLE). Defaults to vocab-size when unset.",
+        )
+
     def register_patches(self, patch_manager, args):
         from mindspeed.core.models.common.embeddings.language_model_embedding import language_model_embedding_forward_wrapper
         from mindspeed_llm.core.models.common.embeddings.language_model_embedding import language_model_embedding_init_func
