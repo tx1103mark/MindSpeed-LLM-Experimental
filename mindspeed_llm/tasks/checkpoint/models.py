@@ -207,6 +207,17 @@ class ModelBase(abc.ABC):
             self.set_embedding_per_layer_projection_norm_weight(
                 data=src_model.get_embedding_per_layer_projection_norm_weight()
             )
+            # PLE LayerNorm is affine; copy/initialize bias to avoid NaN from to_empty().
+            if hasattr(self, "set_embedding_per_layer_projection_norm_bias") and \
+                hasattr(src_model, "has_embedding_per_layer_projection_norm_bias") and \
+                src_model.has_embedding_per_layer_projection_norm_bias():
+                self.set_embedding_per_layer_projection_norm_bias(
+                    data=src_model.get_embedding_per_layer_projection_norm_bias()
+                )
+            elif hasattr(self, "set_embedding_per_layer_projection_norm_bias") and \
+                hasattr(self, "get_embedding_per_layer_projection_norm_bias"):
+                bias = self.get_embedding_per_layer_projection_norm_bias()
+                self.set_embedding_per_layer_projection_norm_bias(data=torch.zeros_like(bias))
 
     def set_postprocess_state(self, src_model):
         final_layernorm_weight = src_model.get_final_layernorm_weight()
