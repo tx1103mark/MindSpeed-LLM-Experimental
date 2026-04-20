@@ -106,9 +106,12 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_dir, trust_remote_code=True)
     batch = tokenizer(cli_args.prompt, return_tensors="pt", add_special_tokens=True)
     input_ids = batch["input_ids"]
+    attention_mask = batch.get("attention_mask", None)
 
     device = _resolve_device(cli_args.cpu)
     input_ids = input_ids.to(device)
+    if attention_mask is not None:
+        attention_mask = attention_mask.to(device)
     print(f"[INFO] device={device}, prompt_tokens={input_ids.shape[1]}")
 
     with torch.no_grad():
@@ -147,7 +150,7 @@ def main():
     else:
         print("[WARN] HF model has no lm_head.weight")
     with torch.no_grad():
-        hf_logits = hf_model(input_ids=input_ids).logits
+        hf_logits = hf_model(input_ids=input_ids, attention_mask=attention_mask).logits
 
     print(f"[INFO] MG logits shape={tuple(mg_logits.shape)} dtype={mg_logits.dtype}")
     print(f"[INFO] HF logits shape={tuple(hf_logits.shape)} dtype={hf_logits.dtype}")
@@ -166,6 +169,8 @@ def main():
     print(f"[INFO] nan/inf counts MG nan={mg_nan} inf={mg_inf}; HF nan={hf_nan} inf={hf_inf}")
     if mg_nan or hf_nan or mg_inf or hf_inf:
         print("[WARN] Found NaN/Inf in logits; numeric compare may be invalid.")
+        if hf_nan > 0 and cli_args.dtype != "float32":
+            print("[HINT] HF has NaN in non-fp32 mode; retry with --dtype float32.")
 
     diff = (mg_last - hf_last).abs()
     max_abs = diff.max().item()
@@ -196,6 +201,7 @@ def main():
         with torch.no_grad():
             hf_gen = hf_model.generate(
                 input_ids=input_ids,
+                attention_mask=attention_mask,
                 do_sample=False,
                 max_new_tokens=cli_args.max_new_tokens,
                 pad_token_id=tokenizer.pad_token_id,
@@ -204,8 +210,9 @@ def main():
         hf_text = tokenizer.decode(hf_gen[0], skip_special_tokens=False)
 
         # MG greedy generate (through MindSpeed infer wrapper)
+        mg_input_for_gen = input_ids.detach().cpu()
         mg_out = mg_model.generate(
-            input_ids=input_ids,
+            input_ids=mg_input_for_gen,
             do_sample=False,
             max_new_tokens=cli_args.max_new_tokens,
             detokenize=False,
