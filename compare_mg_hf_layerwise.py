@@ -114,6 +114,59 @@ def main():
     hf_input_ids = input_ids_cpu.to(hf_dev)
     hf_attn_2d = attn_2d_cpu.to(hf_dev) if attn_2d_cpu is not None else None
 
+    # Quick param-alignment diagnostics for likely mismatch hotspots.
+    try:
+        mg_emb = mg_model.embedding.word_embeddings.weight.detach().float().cpu()
+        hf_emb = hf_model.model.embed_tokens.weight.detach().float().cpu()
+        emb_cos = F.cosine_similarity(mg_emb.reshape(1, -1), hf_emb.reshape(1, -1), dim=-1).item()
+        emb_mae = (mg_emb - hf_emb).abs().mean().item()
+        print(f"[PARAM] embed_tokens cos={emb_cos:.6f} mae={emb_mae:.6e}")
+    except Exception as e:
+        print(f"[PARAM] embed_tokens compare skipped: {e}")
+
+    try:
+        mg_l0 = mg_model.decoder.layers[0]
+        hf_l0 = hf_model.model.layers[0]
+
+        mg_qkv = mg_l0.self_attention.linear_qkv.weight.detach().float().cpu()
+        qsz = hf_l0.self_attn.q_proj.weight.shape[0]
+        ksz = hf_l0.self_attn.k_proj.weight.shape[0]
+        vsz = hf_l0.self_attn.v_proj.weight.shape[0]
+        mg_q = mg_qkv[:qsz]
+        mg_k = mg_qkv[qsz:qsz + ksz]
+        mg_v = mg_qkv[qsz + ksz:qsz + ksz + vsz]
+
+        hf_q = hf_l0.self_attn.q_proj.weight.detach().float().cpu()
+        hf_k = hf_l0.self_attn.k_proj.weight.detach().float().cpu()
+        hf_v = hf_l0.self_attn.v_proj.weight.detach().float().cpu()
+
+        def _cos(a, b):
+            return F.cosine_similarity(a.reshape(1, -1), b.reshape(1, -1), dim=-1).item()
+
+        print(
+            "[PARAM] l0 qkv cos:",
+            f"q={_cos(mg_q, hf_q):.6f}",
+            f"k={_cos(mg_k, hf_k):.6f}",
+            f"v={_cos(mg_v, hf_v):.6f}",
+        )
+        print(
+            "[PARAM] l0 qkv cross-cos:",
+            f"q~k={_cos(mg_q, hf_k):.6f}",
+            f"q~v={_cos(mg_q, hf_v):.6f}",
+            f"k~q={_cos(mg_k, hf_q):.6f}",
+            f"v~q={_cos(mg_v, hf_q):.6f}",
+        )
+
+        mg_fc1 = mg_l0.mlp.linear_fc1.weight.detach().float().cpu()
+        hf_fc1 = hf_l0.mlp.gate_up_proj.weight.detach().float().cpu()
+        fc1_cos = _cos(mg_fc1, hf_fc1)
+        half = hf_fc1.shape[0] // 2
+        hf_fc1_swapped = torch.cat([hf_fc1[half:], hf_fc1[:half]], dim=0)
+        fc1_swap_cos = _cos(mg_fc1, hf_fc1_swapped)
+        print(f"[PARAM] l0 fc1 cos={fc1_cos:.6f} swapped_half_cos={fc1_swap_cos:.6f}")
+    except Exception as e:
+        print(f"[PARAM] l0 qkv/fc1 compare skipped: {e}")
+
     print(f"[INFO] MG model class={mg_model.__class__.__name__}")
     mg_decoder = getattr(mg_model, "decoder", None)
     if mg_decoder is None and hasattr(mg_model, "language_model"):
