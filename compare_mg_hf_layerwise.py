@@ -60,6 +60,16 @@ def tensor_from_output(output):
     return None
 
 
+def unwrap_module(m):
+    # Megatron may wrap GPTModel with Float16Module/DDP wrappers.
+    seen = set()
+    cur = m
+    while hasattr(cur, "module") and id(cur) not in seen:
+        seen.add(id(cur))
+        cur = cur.module
+    return cur
+
+
 def main():
     args, megatron_extra = parse_args()
     if not megatron_extra:
@@ -91,7 +101,7 @@ def main():
     infer = mg_wrap.infer_model
     mg_attn_mask, position_ids = infer.build_attention_mask_and_position_ids(mg_input_ids)
 
-    mg_model = get_args().model[0]
+    mg_model = unwrap_module(get_args().model[0])
     mg_model.eval()
 
     hf_model = AutoModelForCausalLM.from_pretrained(
@@ -104,10 +114,19 @@ def main():
     hf_input_ids = input_ids_cpu.to(hf_dev)
     hf_attn_2d = attn_2d_cpu.to(hf_dev) if attn_2d_cpu is not None else None
 
-    mg_layers = getattr(mg_model.decoder, "layers", None)
+    print(f"[INFO] MG model class={mg_model.__class__.__name__}")
+    mg_decoder = getattr(mg_model, "decoder", None)
+    if mg_decoder is None and hasattr(mg_model, "language_model"):
+        mg_decoder = getattr(mg_model.language_model, "encoder", None) or getattr(mg_model.language_model, "decoder", None)
+    mg_layers = getattr(mg_decoder, "layers", None) if mg_decoder is not None else None
+
     hf_layers = getattr(hf_model.model, "layers", None)
     if mg_layers is None or hf_layers is None:
-        raise RuntimeError("Cannot find decoder layers in MG or HF model.")
+        raise RuntimeError(
+            f"Cannot find decoder layers in MG or HF model. "
+            f"MG decoder={type(mg_decoder).__name__ if mg_decoder is not None else None}, "
+            f"HF model has layers={hasattr(getattr(hf_model, 'model', None), 'layers')}"
+        )
 
     mg_hidden: Dict[int, torch.Tensor] = {}
     hf_hidden: Dict[int, torch.Tensor] = {}
