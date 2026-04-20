@@ -80,6 +80,7 @@ class NebulaPLEDecoderLayer(Qwen3DecoderLayer):
 @auto_docstring
 class NebulaPLEModel(Qwen3PreTrainedModel):
     config: NebulaPLEConfig
+    config_class = NebulaPLEConfig
 
     def __init__(self, config: NebulaPLEConfig):
         super().__init__(config)
@@ -196,6 +197,7 @@ class NebulaPLEModel(Qwen3PreTrainedModel):
 @auto_docstring
 class NebulaPLEForCausalLM(Qwen3PreTrainedModel, GenerationMixin):
     config: NebulaPLEConfig
+    config_class = NebulaPLEConfig
     _tied_weights_keys = ["lm_head.weight"]
     _tp_plan = {"lm_head": "colwise_rep"}
     _pp_plan = {"lm_head": (["hidden_states"], ["logits"])}
