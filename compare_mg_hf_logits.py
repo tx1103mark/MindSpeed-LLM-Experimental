@@ -40,6 +40,7 @@ from inference import model_provider
 from megatron.training import get_args
 from megatron.training.initialize import initialize_megatron
 from mindspeed_llm.tasks.inference.module import MegatronModuleForCausalLM
+from megatron.core import InferenceParams
 
 
 def _split_args() -> Tuple[argparse.Namespace, list]:
@@ -109,7 +110,20 @@ def main():
     print(f"[INFO] device={device}, prompt_tokens={input_ids.shape[1]}")
 
     with torch.no_grad():
-        mg_logits = mg_model.infer_model._forward_step(input_ids)
+        infer = mg_model.infer_model
+        attention_mask, position_ids = infer.build_attention_mask_and_position_ids(input_ids)
+        model = get_args().model[0]
+        try:
+            # Some branches keep old ForwardStep(model, batch, seq) signature.
+            forward_step = infer.ForwardStep(model, input_ids.size(0), input_ids.size(1))
+        except TypeError:
+            # Newer branches use ForwardStep(model, inference_context).
+            inference_context = InferenceParams(
+                max_batch_size=input_ids.size(0),
+                max_sequence_length=input_ids.size(1),
+            )
+            forward_step = infer.ForwardStep(model, inference_context)
+        mg_logits = forward_step(input_ids, position_ids, attention_mask)
 
     hf_model = AutoModelForCausalLM.from_pretrained(
         cli_args.hf_dir,
