@@ -294,6 +294,21 @@ class ModelBase(abc.ABC):
                 layer_idx=dst_layer_idx,
                 data=src_model.get_layers_post_per_layer_input_norm_weight(layer_idx=src_layer_idx),
             )
+            # PLE LayerNorm is affine; if bias is not copied, to_empty() can leave NaNs.
+            if hasattr(self, "set_layers_post_per_layer_input_norm_bias") and \
+                hasattr(src_model, "has_layers_post_per_layer_input_norm_bias") and \
+                src_model.has_layers_post_per_layer_input_norm_bias(layer_idx=src_layer_idx):
+                self.set_layers_post_per_layer_input_norm_bias(
+                    layer_idx=dst_layer_idx,
+                    data=src_model.get_layers_post_per_layer_input_norm_bias(layer_idx=src_layer_idx),
+                )
+            elif hasattr(self, "set_layers_post_per_layer_input_norm_bias") and \
+                hasattr(self, "get_layers_post_per_layer_input_norm_bias"):
+                bias = self.get_layers_post_per_layer_input_norm_bias(layer_idx=dst_layer_idx)
+                self.set_layers_post_per_layer_input_norm_bias(
+                    layer_idx=dst_layer_idx,
+                    data=torch.zeros_like(bias),
+                )
 
     def set_attn_state(self, src_layer_idx, dst_layer_idx, src_model):
         """Set self-attention params."""
