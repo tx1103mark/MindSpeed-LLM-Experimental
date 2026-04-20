@@ -52,6 +52,7 @@ def _split_args() -> Tuple[argparse.Namespace, list]:
     parser.add_argument("--topk", type=int, default=10, help="Top-k for overlap checks.")
     parser.add_argument("--dtype", default="bfloat16", choices=["float32", "float16", "bfloat16"])
     parser.add_argument("--cpu", action="store_true", help="Force run HF side on CPU.")
+    parser.add_argument("--hf-cpu", action="store_true", help="Run HF model on CPU while keeping MG on accelerator.")
     parser.add_argument("--print-generate", action="store_true", help="Print short greedy generation from MG and HF.")
     parser.add_argument("--max-new-tokens", type=int, default=32, help="Max new tokens for generation print.")
     parser.add_argument(
@@ -69,6 +70,14 @@ def _split_args() -> Tuple[argparse.Namespace, list]:
 def _resolve_device(force_cpu: bool) -> torch.device:
     if force_cpu:
         return torch.device("cpu")
+    if hasattr(torch, "npu") and torch.npu.is_available():
+        return torch.device("npu")
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    return torch.device("cpu")
+
+
+def _infer_accel_device() -> torch.device:
     if hasattr(torch, "npu") and torch.npu.is_available():
         return torch.device("npu")
     if torch.cuda.is_available():
@@ -108,33 +117,33 @@ def main():
     input_ids = batch["input_ids"]
     attention_mask = batch.get("attention_mask", None)
 
-    device = _resolve_device(cli_args.cpu)
-    input_ids = input_ids.to(device)
-    if attention_mask is not None:
-        attention_mask = attention_mask.to(device)
-    print(f"[INFO] device={device}, prompt_tokens={input_ids.shape[1]}")
+    mg_device = _infer_accel_device()
+    hf_device = torch.device("cpu") if cli_args.hf_cpu else _resolve_device(cli_args.cpu)
+
+    mg_input_ids = input_ids.to(mg_device)
+    print(f"[INFO] mg_device={mg_device}, hf_device={hf_device}, prompt_tokens={mg_input_ids.shape[1]}")
 
     with torch.no_grad():
         infer = mg_model.infer_model
-        attention_mask, position_ids = infer.build_attention_mask_and_position_ids(input_ids)
+        mg_attention_mask, position_ids = infer.build_attention_mask_and_position_ids(mg_input_ids)
         model = get_args().model[0]
         try:
             # Some branches keep old ForwardStep(model, batch, seq) signature.
-            forward_step = infer.ForwardStep(model, input_ids.size(0), input_ids.size(1))
+            forward_step = infer.ForwardStep(model, mg_input_ids.size(0), mg_input_ids.size(1))
         except TypeError:
             # Newer branches use ForwardStep(model, inference_context).
             inference_context = InferenceParams(
-                max_batch_size=input_ids.size(0),
-                max_sequence_length=input_ids.size(1),
+                max_batch_size=mg_input_ids.size(0),
+                max_sequence_length=mg_input_ids.size(1),
             )
             forward_step = infer.ForwardStep(model, inference_context)
-        mg_logits = forward_step(input_ids, position_ids, attention_mask)
+        mg_logits = forward_step(mg_input_ids, position_ids, mg_attention_mask)
 
     hf_model = AutoModelForCausalLM.from_pretrained(
         cli_args.hf_dir,
         trust_remote_code=True,
         torch_dtype=_torch_dtype(cli_args.dtype),
-    ).to(device)
+    ).to(hf_device)
     hf_model.eval()
 
     hf_cfg = hf_model.config
@@ -149,8 +158,25 @@ def main():
         print(f"[INFO] HF lm_head.weight shape={tuple(hf_model.lm_head.weight.shape)}")
     else:
         print("[WARN] HF model has no lm_head.weight")
+
+    bad_params = []
+    for n, w in hf_model.named_parameters():
+        if not torch.is_floating_point(w):
+            continue
+        wn = w.detach()
+        if torch.isnan(wn).any() or torch.isinf(wn).any():
+            bad_params.append(n)
+            if len(bad_params) >= 10:
+                break
+    if bad_params:
+        print(f"[WARN] HF has NaN/Inf parameters (showing up to 10): {bad_params}")
+    else:
+        print("[INFO] HF parameters finite check: no NaN/Inf found.")
+    hf_input_ids = input_ids.to(hf_device)
+    hf_attention_mask = attention_mask.to(hf_device) if attention_mask is not None else None
+
     with torch.no_grad():
-        hf_logits = hf_model(input_ids=input_ids, attention_mask=attention_mask).logits
+        hf_logits = hf_model(input_ids=hf_input_ids, attention_mask=hf_attention_mask).logits
 
     print(f"[INFO] MG logits shape={tuple(mg_logits.shape)} dtype={mg_logits.dtype}")
     print(f"[INFO] HF logits shape={tuple(hf_logits.shape)} dtype={hf_logits.dtype}")
@@ -200,8 +226,8 @@ def main():
         # HF greedy generate
         with torch.no_grad():
             hf_gen = hf_model.generate(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
+                input_ids=hf_input_ids,
+                attention_mask=hf_attention_mask,
                 do_sample=False,
                 max_new_tokens=cli_args.max_new_tokens,
                 pad_token_id=tokenizer.pad_token_id,
@@ -210,7 +236,7 @@ def main():
         hf_text = tokenizer.decode(hf_gen[0], skip_special_tokens=False)
 
         # MG greedy generate (through MindSpeed infer wrapper)
-        mg_input_for_gen = input_ids.detach().cpu()
+        mg_input_for_gen = mg_input_ids.detach().cpu()
         mg_out = mg_model.generate(
             input_ids=mg_input_for_gen,
             do_sample=False,
