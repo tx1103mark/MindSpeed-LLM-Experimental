@@ -335,20 +335,24 @@ class ModelBase(abc.ABC):
                 self.set_layers_self_attention_linear_proj_lora_A_default_weight(layer_idx=dst_layer_idx, data=proj_lora_A_weight)
                 self.set_layers_self_attention_linear_proj_lora_B_default_weight(layer_idx=dst_layer_idx, data=proj_lora_B_weight)
         else:
-            if getattr(src_model.get_args(), "qk_layernorm", False):
-                if getattr(src_model.get_args(), "multi_latent_attention", False):
-                    if getattr(src_model.get_args(), "q_lora_rank", None):
-                        q_layernorm = src_model.get_layers_self_attention_q_layernorm_weight(layer_idx=src_layer_idx)
-                        self.set_layers_self_attention_q_layernorm_weight(layer_idx=dst_layer_idx, data=q_layernorm)
+            # Do not rely only on src args (checkpoint may miss args); prefer module presence checks.
+            has_mla = getattr(src_model.get_args(), "multi_latent_attention", False)
+            has_qk_ln_modules = hasattr(src_model, "has_layers_self_attention_q_layernorm_module") and                 hasattr(self, "has_layers_self_attention_q_layernorm_module") and                 src_model.has_layers_self_attention_q_layernorm_module(layer_idx=src_layer_idx) and                 self.has_layers_self_attention_q_layernorm_module(layer_idx=dst_layer_idx)
+
+            if has_qk_ln_modules:
+                q_layernorm = src_model.get_layers_self_attention_q_layernorm_weight(layer_idx=src_layer_idx)
+                self.set_layers_self_attention_q_layernorm_weight(layer_idx=dst_layer_idx, data=q_layernorm)
+
+            if has_mla:
+                if hasattr(src_model, "has_layers_self_attention_kv_layernorm_module") and                     hasattr(self, "has_layers_self_attention_kv_layernorm_module") and                     src_model.has_layers_self_attention_kv_layernorm_module(layer_idx=src_layer_idx) and                     self.has_layers_self_attention_kv_layernorm_module(layer_idx=dst_layer_idx):
                     kv_layernorm = src_model.get_layers_self_attention_kv_layernorm_weight(layer_idx=src_layer_idx)
                     self.set_layers_self_attention_kv_layernorm_weight(layer_idx=dst_layer_idx, data=kv_layernorm)
-                else:
-                    q_layernorm = src_model.get_layers_self_attention_q_layernorm_weight(layer_idx=src_layer_idx)
-                    self.set_layers_self_attention_q_layernorm_weight(layer_idx=dst_layer_idx, data=q_layernorm)
+            else:
+                if hasattr(src_model, "has_layers_self_attention_k_layernorm_module") and                     hasattr(self, "has_layers_self_attention_k_layernorm_module") and                     src_model.has_layers_self_attention_k_layernorm_module(layer_idx=src_layer_idx) and                     self.has_layers_self_attention_k_layernorm_module(layer_idx=dst_layer_idx):
                     k_layernorm = src_model.get_layers_self_attention_k_layernorm_weight(layer_idx=src_layer_idx)
                     self.set_layers_self_attention_k_layernorm_weight(layer_idx=dst_layer_idx, data=k_layernorm)
 
-            if getattr(src_model.get_args(), "multi_latent_attention", False):
+            if has_mla:
                 if getattr(src_model.get_args(), "q_lora_rank", None):
                     linear_qb = src_model.get_layers_self_attention_linear_q_up_proj_weight(layer_idx=src_layer_idx)
                     self.set_layers_self_attention_linear_q_up_proj_weight(layer_idx=dst_layer_idx, data=linear_qb)
