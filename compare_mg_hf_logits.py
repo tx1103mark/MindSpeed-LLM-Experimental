@@ -52,6 +52,8 @@ def _split_args() -> Tuple[argparse.Namespace, list]:
     parser.add_argument("--topk", type=int, default=10, help="Top-k for overlap checks.")
     parser.add_argument("--dtype", default="bfloat16", choices=["float32", "float16", "bfloat16"])
     parser.add_argument("--cpu", action="store_true", help="Force run HF side on CPU.")
+    parser.add_argument("--print-generate", action="store_true", help="Print short greedy generation from MG and HF.")
+    parser.add_argument("--max-new-tokens", type=int, default=32, help="Max new tokens for generation print.")
     parser.add_argument(
         "megatron_args",
         nargs=argparse.REMAINDER,
@@ -131,14 +133,39 @@ def main():
         torch_dtype=_torch_dtype(cli_args.dtype),
     ).to(device)
     hf_model.eval()
+
+    hf_cfg = hf_model.config
+    print(
+        "[INFO] HF config:",
+        f"model_type={getattr(hf_cfg, 'model_type', None)}",
+        f"architectures={getattr(hf_cfg, 'architectures', None)}",
+        f"vocab_size={getattr(hf_cfg, 'vocab_size', None)}",
+        f"hidden_size={getattr(hf_cfg, 'hidden_size', None)}",
+    )
+    if hasattr(hf_model, 'lm_head') and hasattr(hf_model.lm_head, 'weight'):
+        print(f"[INFO] HF lm_head.weight shape={tuple(hf_model.lm_head.weight.shape)}")
+    else:
+        print("[WARN] HF model has no lm_head.weight")
     with torch.no_grad():
         hf_logits = hf_model(input_ids=input_ids).logits
 
+    print(f"[INFO] MG logits shape={tuple(mg_logits.shape)} dtype={mg_logits.dtype}")
+    print(f"[INFO] HF logits shape={tuple(hf_logits.shape)} dtype={hf_logits.dtype}")
+    if mg_logits.ndim == 3 and hf_logits.ndim == 3:
+        print(f"[INFO] vocab dim MG={mg_logits.shape[-1]} HF={hf_logits.shape[-1]}")
     if mg_logits.shape != hf_logits.shape:
         print(f"[WARN] shape mismatch: MG={tuple(mg_logits.shape)} HF={tuple(hf_logits.shape)}")
 
     mg_last = mg_logits[:, -1, :].float().cpu()
     hf_last = hf_logits[:, -1, :].float().cpu()
+
+    mg_nan = torch.isnan(mg_last).sum().item()
+    hf_nan = torch.isnan(hf_last).sum().item()
+    mg_inf = torch.isinf(mg_last).sum().item()
+    hf_inf = torch.isinf(hf_last).sum().item()
+    print(f"[INFO] nan/inf counts MG nan={mg_nan} inf={mg_inf}; HF nan={hf_nan} inf={hf_inf}")
+    if mg_nan or hf_nan or mg_inf or hf_inf:
+        print("[WARN] Found NaN/Inf in logits; numeric compare may be invalid.")
 
     diff = (mg_last - hf_last).abs()
     max_abs = diff.max().item()
@@ -162,6 +189,47 @@ def main():
     print(f"[RESULT] top{topk}_overlap={overlap}/{topk}")
     print(f"[DETAIL] MG top{topk} ids: {mg_topk_ids}")
     print(f"[DETAIL] HF top{topk} ids: {hf_topk_ids}")
+
+    if cli_args.print_generate:
+        print("[INFO] Running short generation preview ...")
+        # HF greedy generate
+        with torch.no_grad():
+            hf_gen = hf_model.generate(
+                input_ids=input_ids,
+                do_sample=False,
+                max_new_tokens=cli_args.max_new_tokens,
+                pad_token_id=tokenizer.pad_token_id,
+                eos_token_id=tokenizer.eos_token_id,
+            )
+        hf_text = tokenizer.decode(hf_gen[0], skip_special_tokens=False)
+
+        # MG greedy generate (through MindSpeed infer wrapper)
+        mg_out = mg_model.generate(
+            input_ids=input_ids,
+            do_sample=False,
+            max_new_tokens=cli_args.max_new_tokens,
+            detokenize=False,
+            include_input=True,
+            tokenizer=tokenizer,
+        )
+
+        mg_tokens = None
+        if isinstance(mg_out, list) and len(mg_out) > 0:
+            first = mg_out[0]
+            if torch.is_tensor(first):
+                mg_tokens = first.tolist()
+            elif isinstance(first, list):
+                mg_tokens = first
+        elif torch.is_tensor(mg_out):
+            mg_tokens = mg_out[0].tolist() if mg_out.ndim > 1 else mg_out.tolist()
+
+        if mg_tokens is not None:
+            mg_text = tokenizer.decode(mg_tokens, skip_special_tokens=False)
+            print(f"[GEN][MG ] {mg_text}")
+        else:
+            print(f"[GEN][MG ] raw={mg_out}")
+
+        print(f"[GEN][HF ] {hf_text}")
 
     # Keep a clear signal for CI/manual checks.
     if cos < 0.999 or overlap < max(1, int(topk * 0.7)):
