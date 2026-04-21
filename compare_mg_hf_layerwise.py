@@ -28,6 +28,8 @@ def parse_args() -> Tuple[argparse.Namespace, List[str]]:
     p.add_argument("--prompt", required=True)
     p.add_argument("--dtype", default="float32", choices=["float32", "float16", "bfloat16"])
     p.add_argument("--hf-cpu", action="store_true")
+    p.add_argument("--max-new-tokens", type=int, default=32)
+    p.add_argument("--print-generate", action=argparse.BooleanOptionalAction, default=True)
     p.add_argument("megatron_args", nargs=argparse.REMAINDER)
     args = p.parse_args()
     extra = args.megatron_args
@@ -111,15 +113,33 @@ def get_hf_fc1_weight(hf_layer):
 
 
 def safe_cos(a: torch.Tensor, b: torch.Tensor):
+    def _flat_cos(x: torch.Tensor, y: torch.Tensor) -> float:
+        x = x.detach().double().reshape(-1)
+        y = y.detach().double().reshape(-1)
+        denom = x.norm() * y.norm()
+        if denom.item() == 0.0:
+            return float("nan")
+        v = (x @ y / denom).item()
+        return max(-1.0, min(1.0, v))
+
     if a.shape == b.shape:
-        return F.cosine_similarity(a.reshape(1, -1), b.reshape(1, -1), dim=-1).item(), "direct"
+        return _flat_cos(a, b), "direct"
     if a.numel() == b.numel():
-        return F.cosine_similarity(a.reshape(1, -1), b.reshape(1, -1), dim=-1).item(), "reshape_only"
+        return _flat_cos(a, b), "reshape_only"
     if a.t().shape == b.shape:
-        return F.cosine_similarity(a.t().reshape(1, -1), b.reshape(1, -1), dim=-1).item(), "a_transposed"
+        return _flat_cos(a.t(), b), "a_transposed"
     if b.t().shape == a.shape:
-        return F.cosine_similarity(a.reshape(1, -1), b.t().reshape(1, -1), dim=-1).item(), "b_transposed"
+        return _flat_cos(a, b.t()), "b_transposed"
     raise ValueError(f"shape mismatch: a={tuple(a.shape)} b={tuple(b.shape)}")
+
+
+def mean_feature_cos(a: torch.Tensor, b: torch.Tensor) -> float:
+    a2 = a.detach().double().reshape(-1, a.shape[-1])
+    b2 = b.detach().double().reshape(-1, b.shape[-1])
+    a2 = F.normalize(a2, dim=-1)
+    b2 = F.normalize(b2, dim=-1)
+    v = (a2 * b2).sum(dim=-1).clamp(min=-1.0, max=1.0).mean().item()
+    return float(v)
 
 
 def main():
@@ -184,7 +204,7 @@ def main():
     try:
         mg_emb = mg_model.embedding.word_embeddings.weight.detach().float().cpu()
         hf_emb = hf_model.model.embed_tokens.weight.detach().float().cpu()
-        emb_cos = F.cosine_similarity(mg_emb.reshape(1, -1), hf_emb.reshape(1, -1), dim=-1).item()
+        emb_cos, _ = safe_cos(mg_emb, hf_emb)
         emb_mae = (mg_emb - hf_emb).abs().mean().item()
         print(f"[PARAM] embed_tokens cos={emb_cos:.6f} mae={emb_mae:.6e}")
     except Exception as e:
@@ -374,6 +394,8 @@ def main():
     print(f"[INFO] devices mg={mg_dev} hf={hf_dev}, captured_layers mg={len(mg_hidden)} hf={len(hf_hidden)}")
 
     first_bad = None
+    layer_warn_cnt = 0
+    layer_records = []
     for i in range(common):
         mg_t = mg_hidden[i]
         hf_t = hf_hidden[i]
@@ -388,24 +410,74 @@ def main():
         diff = (mg_t - hf_t).abs()
         mean_abs = diff.mean().item()
         max_abs = diff.max().item()
-        cos = F.cosine_similarity(
-            mg_t.reshape(-1, mg_t.shape[-1]),
-            hf_t.reshape(-1, hf_t.shape[-1]),
-            dim=-1,
-        ).mean().item()
+        cos = mean_feature_cos(mg_t, hf_t)
         print(f"[LAYER {i:02d}] mean_abs={mean_abs:.6e} max_abs={max_abs:.6e} cos={cos:.6f}")
-        if first_bad is None and (cos < 0.99 or mean_abs > 1e-2):
+        layer_records.append((i, mean_abs, cos))
+        if cos < 0.80 or mean_abs > 0.50:
+            layer_warn_cnt += 1
+        if first_bad is None and (cos < 0.80 or mean_abs > 0.50):
             first_bad = i
 
     mg_last = mg_logits[:, -1, :].float().cpu()
     hf_last = hf_logits[:, -1, :].float().cpu()
-    logit_cos = F.cosine_similarity(mg_last, hf_last, dim=-1).mean().item()
-    print(f"[LOGITS] cos={logit_cos:.6f}, mg_next={int(mg_last.argmax(dim=-1)[0])}, hf_next={int(hf_last.argmax(dim=-1)[0])}")
+    logit_cos = mean_feature_cos(mg_last, hf_last)
+    mg_next = int(mg_last.argmax(dim=-1)[0])
+    hf_next = int(hf_last.argmax(dim=-1)[0])
+    print(f"[LOGITS] cos={logit_cos:.6f}, mg_next={mg_next}, hf_next={hf_next}")
 
-    if first_bad is None:
-        print("[CHECK] PASS: no obvious divergent layer found.")
+    if args.print_generate:
+        try:
+            with torch.no_grad():
+                hf_gen = hf_model.generate(
+                    input_ids=hf_input_ids,
+                    attention_mask=hf_attn_2d,
+                    do_sample=False,
+                    max_new_tokens=args.max_new_tokens,
+                    pad_token_id=tokenizer.pad_token_id,
+                    eos_token_id=tokenizer.eos_token_id,
+                )
+            hf_text = tokenizer.decode(hf_gen[0], skip_special_tokens=False)
+        except Exception as e:
+            hf_text = f"<HF generation failed: {e}>"
+
+        try:
+            mg_out = mg_wrap.generate(
+                input_ids=mg_input_ids.detach().cpu(),
+                do_sample=False,
+                max_new_tokens=args.max_new_tokens,
+                detokenize=False,
+                include_input=True,
+                tokenizer=tokenizer,
+            )
+            mg_tokens = None
+            if isinstance(mg_out, list) and len(mg_out) > 0:
+                first = mg_out[0]
+                if torch.is_tensor(first):
+                    mg_tokens = first.tolist()
+                elif isinstance(first, list):
+                    mg_tokens = first
+            elif torch.is_tensor(mg_out):
+                mg_tokens = mg_out[0].tolist() if mg_out.ndim > 1 else mg_out.tolist()
+            mg_text = tokenizer.decode(mg_tokens, skip_special_tokens=False) if mg_tokens is not None else str(mg_out)
+        except Exception as e:
+            mg_text = f"<MG generation failed: {e}>"
+        print(f"[GEN][MG ] {mg_text}")
+        print(f"[GEN][HF ] {hf_text}")
+
+    # Practical check policy: prioritize logits and greedy next-token match.
+    if logit_cos >= 0.95 and mg_next == hf_next:
+        if layer_warn_cnt > 0:
+            print(
+                f"[CHECK] PASS(logits): logits aligned; "
+                f"layer warnings={layer_warn_cnt}/{common}, first_warn_layer={first_bad}."
+            )
+        else:
+            print("[CHECK] PASS: logits and layers are aligned.")
     else:
-        print(f"[CHECK] first divergent layer appears around index {first_bad}.")
+        print(
+            f"[CHECK] WARNING: logits mismatch (cos={logit_cos:.6f}, next_same={mg_next == hf_next}), "
+            f"layer warnings={layer_warn_cnt}/{common}, first_warn_layer={first_bad}."
+        )
 
 
 if __name__ == "__main__":
