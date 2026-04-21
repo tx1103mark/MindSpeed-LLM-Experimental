@@ -64,6 +64,7 @@ class TransformerLayer(MegatronTransformerLayer):
 
         self.hidden_size_per_layer_input = int(getattr(config, "hidden_size_per_layer_input", 0) or 0)
         if self.hidden_size_per_layer_input > 0:
+            self.ple_alpha = float(getattr(config, "ple_alpha", 0.1))
             self.ple_act = nn.GELU()
             self.per_layer_input_gate = nn.Linear(self.config.hidden_size, self.hidden_size_per_layer_input, bias=False)
             self.per_layer_projection = nn.Linear(self.hidden_size_per_layer_input, self.config.hidden_size, bias=False)
@@ -245,5 +246,5 @@ class TransformerLayer(MegatronTransformerLayer):
         hidden_states = gate * per_layer_input
         hidden_states = self.per_layer_projection(hidden_states)
         hidden_states = self.post_per_layer_input_norm(hidden_states)
-        hidden_states = residual + hidden_states
+        hidden_states = residual + hidden_states * self.ple_alpha
         return hidden_states

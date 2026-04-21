@@ -85,4 +85,6 @@ def transformer_config_post_init_wrapper(fn):
             setattr(self, "vocab_size_per_layer_input", getattr(self, "vocab_size", 0))
         if not hasattr(self, "hidden_size_per_layer_input"):
             setattr(self, "hidden_size_per_layer_input", 0)
+        if not hasattr(self, "ple_alpha"):
+            setattr(self, "ple_alpha", 0.1)
     return wrapper

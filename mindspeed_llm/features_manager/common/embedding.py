@@ -20,6 +20,12 @@ class LanguageModelEmbeddingFeature(MindSpeedFeature):
             default=None,
             help="Vocabulary size for per-layer embeddings (PLE). Defaults to vocab-size when unset.",
         )
+        group.add_argument(
+            "--ple-alpha",
+            type=float,
+            default=0.1,
+            help="Residual scaling factor for PLE injection. Smaller values make PLE start gentler.",
+        )
 
     def register_patches(self, patch_manager, args):
         from mindspeed.core.models.common.embeddings.language_model_embedding import language_model_embedding_forward_wrapper
