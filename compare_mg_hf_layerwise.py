@@ -208,34 +208,46 @@ def main():
             f"v~q={_cos(mg_v, hf_q):.6f}",
         )
 
-        mg_fc1 = mg_l0.mlp.linear_fc1.weight.detach().float().cpu()
-        hf_fc1 = get_hf_fc1_weight(hf_l0)
-        print(f"[PARAM] l0 fc1 shapes: mg={tuple(mg_fc1.shape)} hf={tuple(hf_fc1.shape)}")
-        fc1_cos, fc1_mode = safe_cos(mg_fc1, hf_fc1)
-        print(f"[PARAM] l0 fc1 cos={fc1_cos:.6f} mode={fc1_mode}")
-        if hf_fc1.ndim == 2 and hf_fc1.shape[0] % 2 == 0:
-            half = hf_fc1.shape[0] // 2
-            hf_fc1_swapped = torch.cat([hf_fc1[half:], hf_fc1[:half]], dim=0)
-            try:
-                fc1_swap_cos, fc1_swap_mode = safe_cos(mg_fc1, hf_fc1_swapped)
-                print(f"[PARAM] l0 fc1 swapped_half_cos={fc1_swap_cos:.6f} mode={fc1_swap_mode}")
-            except Exception:
-                pass
+        try:
+            mg_fc1 = mg_l0.mlp.linear_fc1.weight.detach().float().cpu()
+            hf_fc1 = get_hf_fc1_weight(hf_l0)
+            print(f"[PARAM] l0 fc1 shapes: mg={tuple(mg_fc1.shape)} hf={tuple(hf_fc1.shape)}")
+            fc1_cos, fc1_mode = safe_cos(mg_fc1, hf_fc1)
+            print(f"[PARAM] l0 fc1 cos={fc1_cos:.6f} mode={fc1_mode}")
+            if hf_fc1.ndim == 2 and hf_fc1.shape[0] % 2 == 0:
+                half = hf_fc1.shape[0] // 2
+                hf_fc1_swapped = torch.cat([hf_fc1[half:], hf_fc1[:half]], dim=0)
+                try:
+                    fc1_swap_cos, fc1_swap_mode = safe_cos(mg_fc1, hf_fc1_swapped)
+                    print(f"[PARAM] l0 fc1 swapped_half_cos={fc1_swap_cos:.6f} mode={fc1_swap_mode}")
+                except Exception:
+                    pass
+        except Exception as e:
+            print(f"[PARAM] l0 fc1 compare skipped: {e}")
 
-        mg_o = mg_l0.self_attention.linear_proj.weight.detach().float().cpu()
-        hf_o = hf_l0.self_attn.o_proj.weight.detach().float().cpu()
-        o_cos, o_mode = safe_cos(mg_o, hf_o)
-        print(f"[PARAM] l0 o_proj cos={o_cos:.6f} mode={o_mode}")
+        try:
+            mg_o = mg_l0.self_attention.linear_proj.weight.detach().float().cpu()
+            hf_o = hf_l0.self_attn.o_proj.weight.detach().float().cpu()
+            o_cos, o_mode = safe_cos(mg_o, hf_o)
+            print(f"[PARAM] l0 o_proj cos={o_cos:.6f} mode={o_mode}")
+        except Exception as e:
+            print(f"[PARAM] l0 o_proj compare skipped: {e}")
 
-        mg_in_ln = mg_l0.input_layernorm.weight.detach().float().cpu()
-        hf_in_ln = hf_l0.input_layernorm.weight.detach().float().cpu()
-        in_ln_cos, in_ln_mode = safe_cos(mg_in_ln, hf_in_ln)
-        print(f"[PARAM] l0 input_ln cos={in_ln_cos:.6f} mode={in_ln_mode}")
+        try:
+            mg_in_ln = mg_l0.input_layernorm.weight.detach().float().cpu()
+            hf_in_ln = hf_l0.input_layernorm.weight.detach().float().cpu()
+            in_ln_cos, in_ln_mode = safe_cos(mg_in_ln, hf_in_ln)
+            print(f"[PARAM] l0 input_ln cos={in_ln_cos:.6f} mode={in_ln_mode}")
+        except Exception as e:
+            print(f"[PARAM] l0 input_ln compare skipped: {e}")
 
-        mg_post_ln = mg_l0.pre_mlp_layernorm.weight.detach().float().cpu()
-        hf_post_ln = hf_l0.post_attention_layernorm.weight.detach().float().cpu()
-        post_ln_cos, post_ln_mode = safe_cos(mg_post_ln, hf_post_ln)
-        print(f"[PARAM] l0 post_attn_ln cos={post_ln_cos:.6f} mode={post_ln_mode}")
+        try:
+            mg_post_ln = mg_l0.pre_mlp_layernorm.weight.detach().float().cpu()
+            hf_post_ln = hf_l0.post_attention_layernorm.weight.detach().float().cpu()
+            post_ln_cos, post_ln_mode = safe_cos(mg_post_ln, hf_post_ln)
+            print(f"[PARAM] l0 post_attn_ln cos={post_ln_cos:.6f} mode={post_ln_mode}")
+        except Exception as e:
+            print(f"[PARAM] l0 post_attn_ln compare skipped: {e}")
 
         has_hf_ple = hasattr(hf_l0, "per_layer_input_gate") and hasattr(hf_l0, "per_layer_projection")
         has_mg_ple = hasattr(mg_l0, "per_layer_input_gate") and hasattr(mg_l0, "per_layer_projection")
@@ -255,6 +267,26 @@ def main():
             hf_ple_ln = hf_l0.post_per_layer_input_norm.weight.detach().float().cpu()
             pln_cos, pln_mode = safe_cos(mg_ple_ln, hf_ple_ln)
             print(f"[PARAM] l0 ple_ln cos={pln_cos:.6f} mode={pln_mode}")
+
+        try:
+            has_hf_global_ple = hasattr(hf_model.model, "embed_tokens_per_layer") and \
+                hasattr(hf_model.model, "per_layer_model_projection")
+            has_mg_global_ple = hasattr(mg_model, "embedding") and \
+                hasattr(mg_model.embedding, "embed_tokens_per_layer") and \
+                hasattr(mg_model, "per_layer_model_projection")
+            print(f"[PARAM] global ple_modules: mg={has_mg_global_ple} hf={has_hf_global_ple}")
+            if has_hf_global_ple and has_mg_global_ple:
+                mg_ple_emb = mg_model.embedding.embed_tokens_per_layer.weight.detach().float().cpu()
+                hf_ple_emb = hf_model.model.embed_tokens_per_layer.weight.detach().float().cpu()
+                pe_cos, pe_mode = safe_cos(mg_ple_emb, hf_ple_emb)
+                print(f"[PARAM] ple_embed_tokens_per_layer cos={pe_cos:.6f} mode={pe_mode}")
+
+                mg_ple_proj = mg_model.per_layer_model_projection.weight.detach().float().cpu()
+                hf_ple_proj = hf_model.model.per_layer_model_projection.weight.detach().float().cpu()
+                pp_cos, pp_mode = safe_cos(mg_ple_proj, hf_ple_proj)
+                print(f"[PARAM] ple_model_projection cos={pp_cos:.6f} mode={pp_mode}")
+        except Exception as e:
+            print(f"[PARAM] global ple compare skipped: {e}")
     except Exception as e:
         print(f"[PARAM] l0 qkv/fc1 compare skipped: {e}")
 
