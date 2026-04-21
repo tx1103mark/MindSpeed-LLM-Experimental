@@ -227,13 +227,18 @@ def main():
             f"k={_cos(mg_k, hf_k):.6f}",
             f"v={_cos(mg_v, hf_v):.6f}",
         )
-        print(
-            "[PARAM] l0 qkv cross-cos:",
-            f"q~k={_cos(mg_q, hf_k):.6f}",
-            f"q~v={_cos(mg_q, hf_v):.6f}",
-            f"k~q={_cos(mg_k, hf_q):.6f}",
-            f"v~q={_cos(mg_v, hf_q):.6f}",
-        )
+        cross_terms = []
+        for name, a, b in [
+            ("q~k", mg_q, hf_k),
+            ("q~v", mg_q, hf_v),
+            ("k~q", mg_k, hf_q),
+            ("v~q", mg_v, hf_q),
+        ]:
+            try:
+                cross_terms.append(f"{name}={_cos(a, b):.6f}")
+            except Exception:
+                cross_terms.append(f"{name}=SKIP(shape)")
+        print("[PARAM] l0 qkv cross-cos:", " ".join(cross_terms))
 
         try:
             mg_fc1 = mg_l0.mlp.linear_fc1.weight.detach().float().cpu()
