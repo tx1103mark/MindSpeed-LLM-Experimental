@@ -137,6 +137,23 @@ def get_message_preprocess(model, args):
         message["word embeddings norm_w"] = model.get_embedding_word_embeddings_norm_weight()
         message["word embeddings norm_b"] = model.get_embedding_word_embeddings_norm_bias()
 
+    # PLE global branch (optional).
+    if hasattr(model, "has_embedding_word_embeddings_per_layer_module") and \
+        model.has_embedding_word_embeddings_per_layer_module():
+        message["word embeddings per layer"] = model.get_embedding_word_embeddings_per_layer_weight()
+    if hasattr(model, "has_embedding_per_layer_model_projection_module") and \
+        model.has_embedding_per_layer_model_projection_module():
+        message["per layer model projection weight"] = model.get_embedding_per_layer_model_projection_weight()
+        if hasattr(model, "has_embedding_per_layer_model_projection_bias") and \
+            model.has_embedding_per_layer_model_projection_bias():
+            message["per layer model projection bias"] = model.get_embedding_per_layer_model_projection_bias()
+    if hasattr(model, "has_embedding_per_layer_projection_norm_module") and \
+        model.has_embedding_per_layer_projection_norm_module():
+        message["per layer projection norm weight"] = model.get_embedding_per_layer_projection_norm_weight()
+        if hasattr(model, "has_embedding_per_layer_projection_norm_bias") and \
+            model.has_embedding_per_layer_projection_norm_bias():
+            message["per layer projection norm bias"] = model.get_embedding_per_layer_projection_norm_bias()
+
     return message
 
 
@@ -155,6 +172,28 @@ def get_message_layer_norm(message, model, md, **kwargs):
     if md.norm_has_bias:
         message["input norm bias"] = model.get_layers_input_layernorm_bias(**kwargs)
         message["post norm bias"] = model.get_layers_self_attention_pre_mlp_layernorm_bias(**kwargs)
+
+    # PLE per-layer branch (optional).
+    if hasattr(model, "has_layers_per_layer_input_gate_module") and \
+        model.has_layers_per_layer_input_gate_module(**kwargs):
+        message["per layer input gate weight"] = model.get_layers_per_layer_input_gate_weight(**kwargs)
+        if hasattr(model, "has_layers_per_layer_input_gate_bias") and \
+            model.has_layers_per_layer_input_gate_bias(**kwargs):
+            message["per layer input gate bias"] = model.get_layers_per_layer_input_gate_bias(**kwargs)
+
+    if hasattr(model, "has_layers_per_layer_projection_module") and \
+        model.has_layers_per_layer_projection_module(**kwargs):
+        message["per layer projection weight"] = model.get_layers_per_layer_projection_weight(**kwargs)
+        if hasattr(model, "has_layers_per_layer_projection_bias") and \
+            model.has_layers_per_layer_projection_bias(**kwargs):
+            message["per layer projection bias"] = model.get_layers_per_layer_projection_bias(**kwargs)
+
+    if hasattr(model, "has_layers_post_per_layer_input_norm_module") and \
+        model.has_layers_post_per_layer_input_norm_module(**kwargs):
+        message["post per layer input norm weight"] = model.get_layers_post_per_layer_input_norm_weight(**kwargs)
+        if hasattr(model, "has_layers_post_per_layer_input_norm_bias") and \
+            model.has_layers_post_per_layer_input_norm_bias(**kwargs):
+            message["post per layer input norm bias"] = model.get_layers_post_per_layer_input_norm_bias(**kwargs)
 
     return message
 

@@ -140,6 +140,12 @@ def set_model_preprocess(model, embeddings_msg):
         orig_word_embed_n_w = embeddings_msg.pop(f"word embeddings norm_w")
         if "word embeddings norm_b" in embeddings_msg:
             orig_word_embed_n_b = embeddings_msg.pop(f"word embeddings norm_b")
+
+    ple_embed = embeddings_msg.pop("word embeddings per layer") if "word embeddings per layer" in embeddings_msg else None
+    ple_proj_w = embeddings_msg.pop("per layer model projection weight") if "per layer model projection weight" in embeddings_msg else None
+    ple_proj_b = embeddings_msg.pop("per layer model projection bias") if "per layer model projection bias" in embeddings_msg else None
+    ple_proj_norm_w = embeddings_msg.pop("per layer projection norm weight") if "per layer projection norm weight" in embeddings_msg else None
+    ple_proj_norm_b = embeddings_msg.pop("per layer projection norm bias") if "per layer projection norm bias" in embeddings_msg else None
     out_word_embed_list = []
     for ep_rank in range(ep_size):
         if md.true_vocab_size is not None:
@@ -164,6 +170,25 @@ def set_model_preprocess(model, embeddings_msg):
 
         out_word_embed_list.append(out_word_embed)
 
+    # PLE global branch is replicated across tp/ep; set once.
+    if ple_embed is not None and hasattr(model, "has_embedding_word_embeddings_per_layer_module") and \
+        model.has_embedding_word_embeddings_per_layer_module():
+        model.set_embedding_word_embeddings_per_layer_weight(data=ple_embed)
+
+    if ple_proj_w is not None and hasattr(model, "has_embedding_per_layer_model_projection_module") and \
+        model.has_embedding_per_layer_model_projection_module():
+        model.set_embedding_per_layer_model_projection_weight(data=ple_proj_w)
+        if ple_proj_b is not None and hasattr(model, "has_embedding_per_layer_model_projection_bias") and \
+            model.has_embedding_per_layer_model_projection_bias():
+            model.set_embedding_per_layer_model_projection_bias(data=ple_proj_b)
+
+    if ple_proj_norm_w is not None and hasattr(model, "has_embedding_per_layer_projection_norm_module") and \
+        model.has_embedding_per_layer_projection_norm_module():
+        model.set_embedding_per_layer_projection_norm_weight(data=ple_proj_norm_w)
+        if ple_proj_norm_b is not None and hasattr(model, "has_embedding_per_layer_projection_norm_bias") and \
+            model.has_embedding_per_layer_projection_norm_bias():
+            model.set_embedding_per_layer_projection_norm_bias(data=ple_proj_norm_b)
+
     return out_word_embed_list
 
 
@@ -183,6 +208,13 @@ def set_model_layer_norm(model_mg, msg, md, **kwargs):
     if post_norm:
         pre_mlp_norm_weight = msg.pop("pre mlp norm weight")
         post_mlp_norm_weight = msg.pop("post mlp norm weight")
+
+    ple_gate_w = msg.pop("per layer input gate weight") if "per layer input gate weight" in msg else None
+    ple_gate_b = msg.pop("per layer input gate bias") if "per layer input gate bias" in msg else None
+    ple_proj_w = msg.pop("per layer projection weight") if "per layer projection weight" in msg else None
+    ple_proj_b = msg.pop("per layer projection bias") if "per layer projection bias" in msg else None
+    ple_norm_w = msg.pop("post per layer input norm weight") if "post per layer input norm weight" in msg else None
+    ple_norm_b = msg.pop("post per layer input norm bias") if "post per layer input norm bias" in msg else None
     # Save them to the model
     for ep_rank in range(margs.expert_model_parallel_size):
         kwargs["ep_rank"] = ep_rank
@@ -199,6 +231,27 @@ def set_model_layer_norm(model_mg, msg, md, **kwargs):
                 model_mg.set_layers_self_attention_post_mlp_layernorm_weight(**kwargs, data=post_mlp_norm_weight)
             if post_norm_bias is not None:
                 model_mg.set_layers_self_attention_pre_mlp_layernorm_bias(**kwargs, data=post_norm_bias)
+
+            if ple_gate_w is not None and hasattr(model_mg, "has_layers_per_layer_input_gate_module") and \
+                model_mg.has_layers_per_layer_input_gate_module(**kwargs):
+                model_mg.set_layers_per_layer_input_gate_weight(**kwargs, data=ple_gate_w)
+                if ple_gate_b is not None and hasattr(model_mg, "has_layers_per_layer_input_gate_bias") and \
+                    model_mg.has_layers_per_layer_input_gate_bias(**kwargs):
+                    model_mg.set_layers_per_layer_input_gate_bias(**kwargs, data=ple_gate_b)
+
+            if ple_proj_w is not None and hasattr(model_mg, "has_layers_per_layer_projection_module") and \
+                model_mg.has_layers_per_layer_projection_module(**kwargs):
+                model_mg.set_layers_per_layer_projection_weight(**kwargs, data=ple_proj_w)
+                if ple_proj_b is not None and hasattr(model_mg, "has_layers_per_layer_projection_bias") and \
+                    model_mg.has_layers_per_layer_projection_bias(**kwargs):
+                    model_mg.set_layers_per_layer_projection_bias(**kwargs, data=ple_proj_b)
+
+            if ple_norm_w is not None and hasattr(model_mg, "has_layers_post_per_layer_input_norm_module") and \
+                model_mg.has_layers_post_per_layer_input_norm_module(**kwargs):
+                model_mg.set_layers_post_per_layer_input_norm_weight(**kwargs, data=ple_norm_w)
+                if ple_norm_b is not None and hasattr(model_mg, "has_layers_post_per_layer_input_norm_bias") and \
+                    model_mg.has_layers_post_per_layer_input_norm_bias(**kwargs):
+                    model_mg.set_layers_post_per_layer_input_norm_bias(**kwargs, data=ple_norm_b)
 
 
 def set_model_layer_attn(model_mg, msg, md, **kwargs):
