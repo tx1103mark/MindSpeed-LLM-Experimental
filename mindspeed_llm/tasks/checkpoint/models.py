@@ -202,12 +202,16 @@ class ModelBase(abc.ABC):
             )
             # PLE projection may be implemented with bias in some HF variants.
             if hasattr(self, "set_embedding_per_layer_model_projection_bias") and \
+                hasattr(self, "has_embedding_per_layer_model_projection_bias") and \
+                self.has_embedding_per_layer_model_projection_bias() and \
                 hasattr(src_model, "has_embedding_per_layer_model_projection_bias") and \
                 src_model.has_embedding_per_layer_model_projection_bias():
                 self.set_embedding_per_layer_model_projection_bias(
                     data=src_model.get_embedding_per_layer_model_projection_bias()
                 )
             elif hasattr(self, "set_embedding_per_layer_model_projection_bias") and \
+                hasattr(self, "has_embedding_per_layer_model_projection_bias") and \
+                self.has_embedding_per_layer_model_projection_bias() and \
                 hasattr(self, "get_embedding_per_layer_model_projection_bias"):
                 bias = self.get_embedding_per_layer_model_projection_bias()
                 self.set_embedding_per_layer_model_projection_bias(data=torch.zeros_like(bias))
@@ -299,6 +303,8 @@ class ModelBase(abc.ABC):
                 data=src_model.get_layers_per_layer_input_gate_weight(layer_idx=src_layer_idx),
             )
             if hasattr(self, "set_layers_per_layer_input_gate_bias") and \
+                hasattr(self, "has_layers_per_layer_input_gate_bias") and \
+                self.has_layers_per_layer_input_gate_bias(layer_idx=dst_layer_idx) and \
                 hasattr(src_model, "has_layers_per_layer_input_gate_bias") and \
                 src_model.has_layers_per_layer_input_gate_bias(layer_idx=src_layer_idx):
                 self.set_layers_per_layer_input_gate_bias(
@@ -306,6 +312,8 @@ class ModelBase(abc.ABC):
                     data=src_model.get_layers_per_layer_input_gate_bias(layer_idx=src_layer_idx),
                 )
             elif hasattr(self, "set_layers_per_layer_input_gate_bias") and \
+                hasattr(self, "has_layers_per_layer_input_gate_bias") and \
+                self.has_layers_per_layer_input_gate_bias(layer_idx=dst_layer_idx) and \
                 hasattr(self, "get_layers_per_layer_input_gate_bias"):
                 bias = self.get_layers_per_layer_input_gate_bias(layer_idx=dst_layer_idx)
                 self.set_layers_per_layer_input_gate_bias(
@@ -322,6 +330,8 @@ class ModelBase(abc.ABC):
                 data=src_model.get_layers_per_layer_projection_weight(layer_idx=src_layer_idx),
             )
             if hasattr(self, "set_layers_per_layer_projection_bias") and \
+                hasattr(self, "has_layers_per_layer_projection_bias") and \
+                self.has_layers_per_layer_projection_bias(layer_idx=dst_layer_idx) and \
                 hasattr(src_model, "has_layers_per_layer_projection_bias") and \
                 src_model.has_layers_per_layer_projection_bias(layer_idx=src_layer_idx):
                 self.set_layers_per_layer_projection_bias(
@@ -329,6 +339,8 @@ class ModelBase(abc.ABC):
                     data=src_model.get_layers_per_layer_projection_bias(layer_idx=src_layer_idx),
                 )
             elif hasattr(self, "set_layers_per_layer_projection_bias") and \
+                hasattr(self, "has_layers_per_layer_projection_bias") and \
+                self.has_layers_per_layer_projection_bias(layer_idx=dst_layer_idx) and \
                 hasattr(self, "get_layers_per_layer_projection_bias"):
                 bias = self.get_layers_per_layer_projection_bias(layer_idx=dst_layer_idx)
                 self.set_layers_per_layer_projection_bias(
