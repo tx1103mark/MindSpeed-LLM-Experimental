@@ -162,6 +162,20 @@ def main():
         torch_dtype=to_dtype(args.dtype),
     ).to(hf_dev)
     hf_model.eval()
+    try:
+        cfg = hf_model.config
+        print(
+            "[INFO] HF config:",
+            f"class={hf_model.__class__.__name__}",
+            f"model_type={getattr(cfg, 'model_type', None)}",
+            f"architectures={getattr(cfg, 'architectures', None)}",
+            f"hidden_size={getattr(cfg, 'hidden_size', None)}",
+            f"intermediate_size={getattr(cfg, 'intermediate_size', None)}",
+            f"num_attention_heads={getattr(cfg, 'num_attention_heads', None)}",
+            f"num_key_value_heads={getattr(cfg, 'num_key_value_heads', None)}",
+        )
+    except Exception as e:
+        print(f"[INFO] HF config print skipped: {e}")
 
     hf_input_ids = input_ids_cpu.to(hf_dev)
     hf_attn_2d = attn_2d_cpu.to(hf_dev) if attn_2d_cpu is not None else None
@@ -179,6 +193,19 @@ def main():
     try:
         mg_l0 = mg_model.decoder.layers[0]
         hf_l0 = hf_model.model.layers[0]
+        print(
+            "[INFO] L0 module classes:",
+            f"mg_layer={mg_l0.__class__.__name__}",
+            f"hf_layer={hf_l0.__class__.__name__}",
+            f"hf_mlp={getattr(hf_l0, 'mlp', None).__class__.__name__ if hasattr(hf_l0, 'mlp') else None}",
+        )
+        if hasattr(hf_l0, "mlp"):
+            mlp = hf_l0.mlp
+            for name in ["gate_up_proj", "gate_proj", "up_proj", "down_proj", "linear_fc1", "linear_fc2"]:
+                if hasattr(mlp, name):
+                    mod = getattr(mlp, name)
+                    if hasattr(mod, "weight"):
+                        print(f"[INFO] HF l0 mlp.{name}.weight shape={tuple(mod.weight.shape)}")
 
         mg_qkv = mg_l0.self_attention.linear_qkv.weight.detach().float().cpu()
         cfg = hf_model.config
