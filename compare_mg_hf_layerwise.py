@@ -70,6 +70,46 @@ def unwrap_module(m):
     return cur
 
 
+def split_grouped_qkv_weight(qkv_weight: torch.Tensor, num_attention_heads: int, num_key_value_heads: int):
+    """Split Megatron grouped QKV packed weight into (q, k, v)."""
+    if qkv_weight.ndim != 2:
+        raise ValueError(f"Expected 2D qkv weight, got shape={tuple(qkv_weight.shape)}")
+    if num_attention_heads % num_key_value_heads != 0:
+        raise ValueError(
+            f"num_attention_heads({num_attention_heads}) must be divisible by "
+            f"num_key_value_heads({num_key_value_heads})"
+        )
+
+    repeats = num_attention_heads // num_key_value_heads
+    groups = num_key_value_heads
+    rows, hidden = qkv_weight.shape
+    per_group = repeats + 2
+    if rows % (groups * per_group) != 0:
+        raise ValueError(
+            f"QKV rows({rows}) is not divisible by groups*per_group ({groups}*{per_group})"
+        )
+
+    head_dim = rows // (groups * per_group)
+    packed = qkv_weight.reshape(groups, per_group, head_dim, hidden)
+    q = packed[:, :repeats, :, :].reshape(-1, hidden)
+    k = packed[:, repeats:repeats + 1, :, :].reshape(-1, hidden)
+    v = packed[:, repeats + 1:, :, :].reshape(-1, hidden)
+    return q, k, v
+
+
+def get_hf_fc1_weight(hf_layer):
+    mlp = hf_layer.mlp
+    if hasattr(mlp, "gate_up_proj") and hasattr(mlp.gate_up_proj, "weight"):
+        return mlp.gate_up_proj.weight.detach().float().cpu()
+    if hasattr(mlp, "gate_proj") and hasattr(mlp, "up_proj"):
+        gate = mlp.gate_proj.weight.detach().float().cpu()
+        up = mlp.up_proj.weight.detach().float().cpu()
+        return torch.cat([gate, up], dim=0)
+    if hasattr(mlp, "linear_fc1") and hasattr(mlp.linear_fc1, "weight"):
+        return mlp.linear_fc1.weight.detach().float().cpu()
+    raise AttributeError("Cannot find HF fc1 projection (gate_up_proj or gate_proj/up_proj or linear_fc1).")
+
+
 def main():
     args, megatron_extra = parse_args()
     if not megatron_extra:
@@ -129,12 +169,10 @@ def main():
         hf_l0 = hf_model.model.layers[0]
 
         mg_qkv = mg_l0.self_attention.linear_qkv.weight.detach().float().cpu()
-        qsz = hf_l0.self_attn.q_proj.weight.shape[0]
-        ksz = hf_l0.self_attn.k_proj.weight.shape[0]
-        vsz = hf_l0.self_attn.v_proj.weight.shape[0]
-        mg_q = mg_qkv[:qsz]
-        mg_k = mg_qkv[qsz:qsz + ksz]
-        mg_v = mg_qkv[qsz + ksz:qsz + ksz + vsz]
+        cfg = hf_model.config
+        nh = int(getattr(cfg, "num_attention_heads"))
+        ng = int(getattr(cfg, "num_key_value_heads", nh))
+        mg_q, mg_k, mg_v = split_grouped_qkv_weight(mg_qkv, nh, ng)
 
         hf_q = hf_l0.self_attn.q_proj.weight.detach().float().cpu()
         hf_k = hf_l0.self_attn.k_proj.weight.detach().float().cpu()
@@ -158,7 +196,7 @@ def main():
         )
 
         mg_fc1 = mg_l0.mlp.linear_fc1.weight.detach().float().cpu()
-        hf_fc1 = hf_l0.mlp.gate_up_proj.weight.detach().float().cpu()
+        hf_fc1 = get_hf_fc1_weight(hf_l0)
         fc1_cos = _cos(mg_fc1, hf_fc1)
         half = hf_fc1.shape[0] // 2
         hf_fc1_swapped = torch.cat([hf_fc1[half:], hf_fc1[:half]], dim=0)
