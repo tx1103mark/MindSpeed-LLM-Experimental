@@ -17,9 +17,9 @@ export CUDA_DEVICE_MAX_CONNECTIONS=1
 # Paths (edit these)
 # -----------------------------
 MG_CKPT_DIR="/path/to/mcore_mg_ckpt"
-HF_SAVE_DIR="/path/to/output_hf_dir"
-HF_CFG_DIR="/path/to/hf_template_dir"
-TOKENIZER_DIR="${HF_SAVE_DIR}"
+HF_WORK_DIR="/path/to/hf_work_dir"
+HF_OUTPUT_DIR="${HF_WORK_DIR}/mg2hf"
+TOKENIZER_DIR="${HF_OUTPUT_DIR}"
 
 # -----------------------------
 # Runtime options
@@ -104,26 +104,41 @@ if [ "${VOCAB_SIZE_PER_LAYER_INPUT}" -gt 0 ]; then
   COMMON_MG_ARGS="${COMMON_MG_ARGS} --vocab-size-per-layer-input ${VOCAB_SIZE_PER_LAYER_INPUT}"
 fi
 
+EXTRA_CONVERT_ARGS=""
+if [ "${HIDDEN_SIZE_PER_LAYER_INPUT}" -gt 0 ]; then
+  EXTRA_CONVERT_ARGS="${EXTRA_CONVERT_ARGS} --hidden-size-per-layer-input ${HIDDEN_SIZE_PER_LAYER_INPUT}"
+fi
+if [ "${VOCAB_SIZE_PER_LAYER_INPUT}" -gt 0 ]; then
+  EXTRA_CONVERT_ARGS="${EXTRA_CONVERT_ARGS} --vocab-size-per-layer-input ${VOCAB_SIZE_PER_LAYER_INPUT}"
+fi
+
 if [ "${RUN_CONVERT}" -eq 1 ]; then
   echo "[STEP 1/3] Converting MG(MeKi) -> HF ..."
-  mkdir -p "${HF_SAVE_DIR}"
-  python convert_ckpt_v2.py \
+  mkdir -p "${HF_WORK_DIR}"
+  python convert_ckpt.py \
+      --use-mcore-models \
+      --model-type GPT \
+      --model-type-hf qwen3 \
       --load-model-type mg \
       --save-model-type hf \
-      --model-type-hf qwen3 \
+      --spec mindspeed_llm.tasks.models.spec.qwen3_spec layer_spec \
       --transformer-impl local \
       --target-tensor-parallel-size "${TARGET_TP}" \
       --target-pipeline-parallel-size "${TARGET_PP}" \
       --target-expert-parallel-size "${TARGET_EP}" \
+      --load-hf-from-config \
+      --meki-dim "${MEKI_DIM}" \
+      --meki-alpha "${MEKI_ALPHA}" \
+      --meki-beta "${MEKI_BETA}" \
+      ${EXTRA_CONVERT_ARGS} \
       --load-dir "${MG_CKPT_DIR}" \
-      --save-dir "${HF_SAVE_DIR}" \
-      --hf-cfg-dir "${HF_CFG_DIR}"
+      --save-dir "${HF_WORK_DIR}"
 
   python - <<PY
 import json
 from pathlib import Path
 
-cfg_path = Path("${HF_SAVE_DIR}") / "config.json"
+cfg_path = Path("${HF_OUTPUT_DIR}") / "config.json"
 if not cfg_path.exists():
     raise FileNotFoundError(f"Missing config.json: {cfg_path}")
 cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
@@ -149,7 +164,7 @@ if [ "${RUN_LOGITS_CHECK}" -eq 1 ]; then
     --master_port "${LOGITS_MASTER_PORT}" \
     compare_mg_hf_logits.py \
     --mg-load-dir "${MG_CKPT_DIR}" \
-    --hf-dir "${HF_SAVE_DIR}" \
+    --hf-dir "${HF_OUTPUT_DIR}" \
     --tokenizer-dir "${TOKENIZER_DIR}" \
     --prompt "${PROMPT}" \
     --topk 10 \
@@ -167,7 +182,7 @@ if [ "${RUN_LAYERWISE_CHECK}" -eq 1 ]; then
     --master_port "${LAYERWISE_MASTER_PORT}" \
     compare_mg_hf_layerwise.py \
     --mg-load-dir "${MG_CKPT_DIR}" \
-    --hf-dir "${HF_SAVE_DIR}" \
+    --hf-dir "${HF_OUTPUT_DIR}" \
     --tokenizer-dir "${TOKENIZER_DIR}" \
     --prompt "${PROMPT}" \
     --dtype float32 \
@@ -177,4 +192,3 @@ if [ "${RUN_LAYERWISE_CHECK}" -eq 1 ]; then
 fi
 
 echo "[DONE] MeKi conversion + validation pipeline finished."
-
