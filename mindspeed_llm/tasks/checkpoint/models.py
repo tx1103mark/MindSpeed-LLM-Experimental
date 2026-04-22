@@ -234,6 +234,55 @@ class ModelBase(abc.ABC):
                 bias = self.get_embedding_per_layer_projection_norm_bias()
                 self.set_embedding_per_layer_projection_norm_bias(data=torch.zeros_like(bias))
 
+        # MeKi optional embedding branch.
+        if hasattr(src_model, "has_embedding_word_embeddings_meki_module") and \
+            hasattr(self, "has_embedding_word_embeddings_meki_module") and \
+            src_model.has_embedding_word_embeddings_meki_module() and self.has_embedding_word_embeddings_meki_module():
+            meki_embed_weight = src_model.get_embedding_word_embeddings_meki_weight()
+            if meki_embed_weight.size(0) > self.get_embedding_word_embeddings_meki_weight().size(0):
+                logger.info(f"Source MeKi embedding size: {meki_embed_weight.size()} "
+                            f"Target MeKi embedding size: {self.get_embedding_word_embeddings_meki_weight().size()}")
+                meki_embed_weight = meki_embed_weight[:self.get_embedding_word_embeddings_meki_weight().size(0), :]
+            self.set_embedding_word_embeddings_meki_weight(data=meki_embed_weight)
+
+        if hasattr(src_model, "has_embedding_meki_model_projection_module") and \
+            hasattr(self, "has_embedding_meki_model_projection_module") and \
+            src_model.has_embedding_meki_model_projection_module() and self.has_embedding_meki_model_projection_module():
+            self.set_embedding_meki_model_projection_weight(
+                data=src_model.get_embedding_meki_model_projection_weight()
+            )
+            if hasattr(self, "set_embedding_meki_model_projection_bias") and \
+                hasattr(self, "has_embedding_meki_model_projection_bias") and \
+                self.has_embedding_meki_model_projection_bias() and \
+                hasattr(src_model, "has_embedding_meki_model_projection_bias") and \
+                src_model.has_embedding_meki_model_projection_bias():
+                self.set_embedding_meki_model_projection_bias(
+                    data=src_model.get_embedding_meki_model_projection_bias()
+                )
+            elif hasattr(self, "set_embedding_meki_model_projection_bias") and \
+                hasattr(self, "has_embedding_meki_model_projection_bias") and \
+                self.has_embedding_meki_model_projection_bias() and \
+                hasattr(self, "get_embedding_meki_model_projection_bias"):
+                bias = self.get_embedding_meki_model_projection_bias()
+                self.set_embedding_meki_model_projection_bias(data=torch.zeros_like(bias))
+
+        if hasattr(src_model, "has_embedding_meki_projection_norm_module") and \
+            hasattr(self, "has_embedding_meki_projection_norm_module") and \
+            src_model.has_embedding_meki_projection_norm_module() and self.has_embedding_meki_projection_norm_module():
+            self.set_embedding_meki_projection_norm_weight(
+                data=src_model.get_embedding_meki_projection_norm_weight()
+            )
+            if hasattr(self, "set_embedding_meki_projection_norm_bias") and \
+                hasattr(src_model, "has_embedding_meki_projection_norm_bias") and \
+                src_model.has_embedding_meki_projection_norm_bias():
+                self.set_embedding_meki_projection_norm_bias(
+                    data=src_model.get_embedding_meki_projection_norm_bias()
+                )
+            elif hasattr(self, "set_embedding_meki_projection_norm_bias") and \
+                hasattr(self, "get_embedding_meki_projection_norm_bias"):
+                bias = self.get_embedding_meki_projection_norm_bias()
+                self.set_embedding_meki_projection_norm_bias(data=torch.zeros_like(bias))
+
     def set_postprocess_state(self, src_model):
         final_layernorm_weight = src_model.get_final_layernorm_weight()
         self.set_final_layernorm_weight(data=final_layernorm_weight)
@@ -368,6 +417,107 @@ class ModelBase(abc.ABC):
                 hasattr(self, "get_layers_post_per_layer_input_norm_bias"):
                 bias = self.get_layers_post_per_layer_input_norm_bias(layer_idx=dst_layer_idx)
                 self.set_layers_post_per_layer_input_norm_bias(
+                    layer_idx=dst_layer_idx,
+                    data=torch.zeros_like(bias),
+                )
+
+        # MeKi per-layer branch (optional).
+        if hasattr(src_model, "has_layers_meki_gate_proj_module") and \
+            hasattr(self, "has_layers_meki_gate_proj_module") and \
+            src_model.has_layers_meki_gate_proj_module(layer_idx=src_layer_idx) and \
+            self.has_layers_meki_gate_proj_module(layer_idx=dst_layer_idx):
+            self.set_layers_meki_gate_proj_weight(
+                layer_idx=dst_layer_idx,
+                data=src_model.get_layers_meki_gate_proj_weight(layer_idx=src_layer_idx),
+            )
+            if hasattr(self, "set_layers_meki_gate_proj_bias") and \
+                hasattr(self, "has_layers_meki_gate_proj_bias") and \
+                self.has_layers_meki_gate_proj_bias(layer_idx=dst_layer_idx) and \
+                hasattr(src_model, "has_layers_meki_gate_proj_bias") and \
+                src_model.has_layers_meki_gate_proj_bias(layer_idx=src_layer_idx):
+                self.set_layers_meki_gate_proj_bias(
+                    layer_idx=dst_layer_idx,
+                    data=src_model.get_layers_meki_gate_proj_bias(layer_idx=src_layer_idx),
+                )
+            elif hasattr(self, "set_layers_meki_gate_proj_bias") and \
+                hasattr(self, "has_layers_meki_gate_proj_bias") and \
+                self.has_layers_meki_gate_proj_bias(layer_idx=dst_layer_idx) and \
+                hasattr(self, "get_layers_meki_gate_proj_bias"):
+                bias = self.get_layers_meki_gate_proj_bias(layer_idx=dst_layer_idx)
+                self.set_layers_meki_gate_proj_bias(
+                    layer_idx=dst_layer_idx,
+                    data=torch.zeros_like(bias),
+                )
+
+        if hasattr(src_model, "has_layers_meki_out_proj_module") and \
+            hasattr(self, "has_layers_meki_out_proj_module") and \
+            src_model.has_layers_meki_out_proj_module(layer_idx=src_layer_idx) and \
+            self.has_layers_meki_out_proj_module(layer_idx=dst_layer_idx):
+            self.set_layers_meki_out_proj_weight(
+                layer_idx=dst_layer_idx,
+                data=src_model.get_layers_meki_out_proj_weight(layer_idx=src_layer_idx),
+            )
+            if hasattr(self, "set_layers_meki_out_proj_bias") and \
+                hasattr(self, "has_layers_meki_out_proj_bias") and \
+                self.has_layers_meki_out_proj_bias(layer_idx=dst_layer_idx) and \
+                hasattr(src_model, "has_layers_meki_out_proj_bias") and \
+                src_model.has_layers_meki_out_proj_bias(layer_idx=src_layer_idx):
+                self.set_layers_meki_out_proj_bias(
+                    layer_idx=dst_layer_idx,
+                    data=src_model.get_layers_meki_out_proj_bias(layer_idx=src_layer_idx),
+                )
+            elif hasattr(self, "set_layers_meki_out_proj_bias") and \
+                hasattr(self, "has_layers_meki_out_proj_bias") and \
+                self.has_layers_meki_out_proj_bias(layer_idx=dst_layer_idx) and \
+                hasattr(self, "get_layers_meki_out_proj_bias"):
+                bias = self.get_layers_meki_out_proj_bias(layer_idx=dst_layer_idx)
+                self.set_layers_meki_out_proj_bias(
+                    layer_idx=dst_layer_idx,
+                    data=torch.zeros_like(bias),
+                )
+
+        if hasattr(src_model, "has_layers_meki_mix_norm_module") and \
+            hasattr(self, "has_layers_meki_mix_norm_module") and \
+            src_model.has_layers_meki_mix_norm_module(layer_idx=src_layer_idx) and \
+            self.has_layers_meki_mix_norm_module(layer_idx=dst_layer_idx):
+            self.set_layers_meki_mix_norm_weight(
+                layer_idx=dst_layer_idx,
+                data=src_model.get_layers_meki_mix_norm_weight(layer_idx=src_layer_idx),
+            )
+            if hasattr(self, "set_layers_meki_mix_norm_bias") and \
+                hasattr(src_model, "has_layers_meki_mix_norm_bias") and \
+                src_model.has_layers_meki_mix_norm_bias(layer_idx=src_layer_idx):
+                self.set_layers_meki_mix_norm_bias(
+                    layer_idx=dst_layer_idx,
+                    data=src_model.get_layers_meki_mix_norm_bias(layer_idx=src_layer_idx),
+                )
+            elif hasattr(self, "set_layers_meki_mix_norm_bias") and \
+                hasattr(self, "get_layers_meki_mix_norm_bias"):
+                bias = self.get_layers_meki_mix_norm_bias(layer_idx=dst_layer_idx)
+                self.set_layers_meki_mix_norm_bias(
+                    layer_idx=dst_layer_idx,
+                    data=torch.zeros_like(bias),
+                )
+
+        if hasattr(src_model, "has_layers_meki_post_norm_module") and \
+            hasattr(self, "has_layers_meki_post_norm_module") and \
+            src_model.has_layers_meki_post_norm_module(layer_idx=src_layer_idx) and \
+            self.has_layers_meki_post_norm_module(layer_idx=dst_layer_idx):
+            self.set_layers_meki_post_norm_weight(
+                layer_idx=dst_layer_idx,
+                data=src_model.get_layers_meki_post_norm_weight(layer_idx=src_layer_idx),
+            )
+            if hasattr(self, "set_layers_meki_post_norm_bias") and \
+                hasattr(src_model, "has_layers_meki_post_norm_bias") and \
+                src_model.has_layers_meki_post_norm_bias(layer_idx=src_layer_idx):
+                self.set_layers_meki_post_norm_bias(
+                    layer_idx=dst_layer_idx,
+                    data=src_model.get_layers_meki_post_norm_bias(layer_idx=src_layer_idx),
+                )
+            elif hasattr(self, "set_layers_meki_post_norm_bias") and \
+                hasattr(self, "get_layers_meki_post_norm_bias"):
+                bias = self.get_layers_meki_post_norm_bias(layer_idx=dst_layer_idx)
+                self.set_layers_meki_post_norm_bias(
                     layer_idx=dst_layer_idx,
                     data=torch.zeros_like(bias),
                 )
@@ -1200,6 +1350,9 @@ class MegatronModel(ModelBase):
             self.args.first_k_dense_replace = getattr(hf_args, "first_k_dense_replace", None)
             self.args.moe_layer_freq = getattr(hf_args, "moe_layer_freq", None)
             self.args.multi_latent_attention = getattr(hf_args, "multi_latent_attention", False)
+            self.args.meki_dim = getattr(hf_args, "meki_dim", 0)
+            self.args.meki_alpha = getattr(hf_args, "meki_alpha", 1.0)
+            self.args.meki_beta = getattr(hf_args, "meki_beta", 1.0)
             self.args.cla_share_factor = getattr(hf_args, "cla_share_factor", 1)
             self.args.shared_expert_intermediate_size = getattr(hf_args, "shared_expert_intermediate_size", None)
             self.args.fc_type = getattr(hf_args, "fc_type", None)
@@ -1245,6 +1398,9 @@ class MegatronModel(ModelBase):
         self.args.shared_expert_gate = getattr(self.args_megatron_checkpoint, "shared_expert_gate", False)
         self.args.fc_type = getattr(self.args_megatron_checkpoint, "fc_type", None)
         self.args.num_layer_list = getattr(self.args_megatron_checkpoint, "num_layer_list", None)
+        self.args.meki_dim = getattr(self.args_megatron_checkpoint, "meki_dim", 0)
+        self.args.meki_alpha = getattr(self.args_megatron_checkpoint, "meki_alpha", 1.0)
+        self.args.meki_beta = getattr(self.args_megatron_checkpoint, "meki_beta", 1.0)
 
     def update_megatron_args_from_cmd_config(self, loader_megatron):
         self.args.ckpt_format = self.args_cmd.ckpt_format
@@ -1263,6 +1419,9 @@ class MegatronModel(ModelBase):
         self.args.vocab_size_per_layer_input = getattr(self.args_cmd, 'vocab_size_per_layer_input', None)
         if self.args.vocab_size_per_layer_input is None:
             self.args.vocab_size_per_layer_input = getattr(self.args, 'vocab_size', None)
+        self.args.meki_dim = getattr(self.args_cmd, 'meki_dim', 0) or 0
+        self.args.meki_alpha = getattr(self.args_cmd, 'meki_alpha', 1.0)
+        self.args.meki_beta = getattr(self.args_cmd, 'meki_beta', 1.0)
         self.args.tokenizer_model = getattr(self.args_cmd, 'tokenizer_model', None)
         self.args.make_vocab_size_divisible_by = getattr(self.args_cmd, 'make_vocab_size_divisible_by', None)
         if self.args_cmd.params_dtype == 'bf16':
@@ -1571,8 +1730,11 @@ class MegatronMCoreModel(MegatronModel):
             "embedding_word_embeddings_norm": "embedding.word_embeddings.norm",
             "embedding_position_embeddings": "embedding.position_embeddings",
             "embedding_word_embeddings_per_layer": "embedding.embed_tokens_per_layer",
+            "embedding_word_embeddings_meki": "embedding.embed_tokens_meki",
             "embedding_per_layer_model_projection": "per_layer_model_projection",
             "embedding_per_layer_projection_norm": "per_layer_projection_norm",
+            "embedding_meki_model_projection": "meki_model_projection",
+            "embedding_meki_projection_norm": "meki_projection_norm",
             "model": "module",
             "layers_input_layernorm": module_layer + "input_layernorm",
             "layers": "decoder.layers",
@@ -1587,6 +1749,10 @@ class MegatronMCoreModel(MegatronModel):
             "layers_per_layer_input_gate": module_layer + "per_layer_input_gate",
             "layers_per_layer_projection": module_layer + "per_layer_projection",
             "layers_post_per_layer_input_norm": module_layer + "post_per_layer_input_norm",
+            "layers_meki_gate_proj": module_layer + "meki_gate_proj",
+            "layers_meki_out_proj": module_layer + "meki_out_proj",
+            "layers_meki_mix_norm": module_layer + "meki_mix_norm",
+            "layers_meki_post_norm": module_layer + "meki_post_norm",
             "layers_self_attention_post_mlp_layernorm": module_layer + "post_mlp_layernorm",
             "final_layernorm": "decoder.final_layernorm",
             "output_layer": "output_layer"

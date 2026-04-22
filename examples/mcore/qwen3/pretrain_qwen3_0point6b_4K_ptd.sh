@@ -23,6 +23,9 @@ MBS=1
 GBS=32
 SEQ_LENGTH=4096
 TRAIN_ITERS=2000
+MEKI_DIM=0
+MEKI_ALPHA=1.0
+MEKI_BETA=1.0
 
 DISTRIBUTED_ARGS="
     --nproc_per_node $NPUS_PER_NODE \
@@ -111,8 +114,18 @@ OUTPUT_ARGS="
     --eval-iters 0 \
 "
 
+MEKI_ARGS=""
+if [ "${MEKI_DIM}" -gt 0 ]; then
+    MEKI_ARGS="
+    --meki-dim ${MEKI_DIM} \
+    --meki-alpha ${MEKI_ALPHA} \
+    --meki-beta ${MEKI_BETA}
+    "
+fi
+
 torchrun $DISTRIBUTED_ARGS pretrain_gpt.py \
     $GPT_ARGS \
+    $MEKI_ARGS \
     $DATA_ARGS \
     $OUTPUT_ARGS \
     $OPTIMIZE_ARGS \

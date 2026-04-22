@@ -146,6 +146,11 @@ def set_model_preprocess(model, embeddings_msg):
     ple_proj_b = embeddings_msg.pop("per layer model projection bias") if "per layer model projection bias" in embeddings_msg else None
     ple_proj_norm_w = embeddings_msg.pop("per layer projection norm weight") if "per layer projection norm weight" in embeddings_msg else None
     ple_proj_norm_b = embeddings_msg.pop("per layer projection norm bias") if "per layer projection norm bias" in embeddings_msg else None
+    meki_embed = embeddings_msg.pop("word embeddings meki") if "word embeddings meki" in embeddings_msg else None
+    meki_proj_w = embeddings_msg.pop("meki model projection weight") if "meki model projection weight" in embeddings_msg else None
+    meki_proj_b = embeddings_msg.pop("meki model projection bias") if "meki model projection bias" in embeddings_msg else None
+    meki_proj_norm_w = embeddings_msg.pop("meki projection norm weight") if "meki projection norm weight" in embeddings_msg else None
+    meki_proj_norm_b = embeddings_msg.pop("meki projection norm bias") if "meki projection norm bias" in embeddings_msg else None
     out_word_embed_list = []
     for ep_rank in range(ep_size):
         if md.true_vocab_size is not None:
@@ -189,6 +194,24 @@ def set_model_preprocess(model, embeddings_msg):
             model.has_embedding_per_layer_projection_norm_bias():
             model.set_embedding_per_layer_projection_norm_bias(data=ple_proj_norm_b)
 
+    if meki_embed is not None and hasattr(model, "has_embedding_word_embeddings_meki_module") and \
+        model.has_embedding_word_embeddings_meki_module():
+        model.set_embedding_word_embeddings_meki_weight(data=meki_embed)
+
+    if meki_proj_w is not None and hasattr(model, "has_embedding_meki_model_projection_module") and \
+        model.has_embedding_meki_model_projection_module():
+        model.set_embedding_meki_model_projection_weight(data=meki_proj_w)
+        if meki_proj_b is not None and hasattr(model, "has_embedding_meki_model_projection_bias") and \
+            model.has_embedding_meki_model_projection_bias():
+            model.set_embedding_meki_model_projection_bias(data=meki_proj_b)
+
+    if meki_proj_norm_w is not None and hasattr(model, "has_embedding_meki_projection_norm_module") and \
+        model.has_embedding_meki_projection_norm_module():
+        model.set_embedding_meki_projection_norm_weight(data=meki_proj_norm_w)
+        if meki_proj_norm_b is not None and hasattr(model, "has_embedding_meki_projection_norm_bias") and \
+            model.has_embedding_meki_projection_norm_bias():
+            model.set_embedding_meki_projection_norm_bias(data=meki_proj_norm_b)
+
     return out_word_embed_list
 
 
@@ -215,6 +238,14 @@ def set_model_layer_norm(model_mg, msg, md, **kwargs):
     ple_proj_b = msg.pop("per layer projection bias") if "per layer projection bias" in msg else None
     ple_norm_w = msg.pop("post per layer input norm weight") if "post per layer input norm weight" in msg else None
     ple_norm_b = msg.pop("post per layer input norm bias") if "post per layer input norm bias" in msg else None
+    meki_gate_w = msg.pop("meki gate proj weight") if "meki gate proj weight" in msg else None
+    meki_gate_b = msg.pop("meki gate proj bias") if "meki gate proj bias" in msg else None
+    meki_out_w = msg.pop("meki out proj weight") if "meki out proj weight" in msg else None
+    meki_out_b = msg.pop("meki out proj bias") if "meki out proj bias" in msg else None
+    meki_mix_norm_w = msg.pop("meki mix norm weight") if "meki mix norm weight" in msg else None
+    meki_mix_norm_b = msg.pop("meki mix norm bias") if "meki mix norm bias" in msg else None
+    meki_post_norm_w = msg.pop("meki post norm weight") if "meki post norm weight" in msg else None
+    meki_post_norm_b = msg.pop("meki post norm bias") if "meki post norm bias" in msg else None
     # Save them to the model
     for ep_rank in range(margs.expert_model_parallel_size):
         kwargs["ep_rank"] = ep_rank
@@ -252,6 +283,34 @@ def set_model_layer_norm(model_mg, msg, md, **kwargs):
                 if ple_norm_b is not None and hasattr(model_mg, "has_layers_post_per_layer_input_norm_bias") and \
                     model_mg.has_layers_post_per_layer_input_norm_bias(**kwargs):
                     model_mg.set_layers_post_per_layer_input_norm_bias(**kwargs, data=ple_norm_b)
+
+            if meki_gate_w is not None and hasattr(model_mg, "has_layers_meki_gate_proj_module") and \
+                model_mg.has_layers_meki_gate_proj_module(**kwargs):
+                model_mg.set_layers_meki_gate_proj_weight(**kwargs, data=meki_gate_w)
+                if meki_gate_b is not None and hasattr(model_mg, "has_layers_meki_gate_proj_bias") and \
+                    model_mg.has_layers_meki_gate_proj_bias(**kwargs):
+                    model_mg.set_layers_meki_gate_proj_bias(**kwargs, data=meki_gate_b)
+
+            if meki_out_w is not None and hasattr(model_mg, "has_layers_meki_out_proj_module") and \
+                model_mg.has_layers_meki_out_proj_module(**kwargs):
+                model_mg.set_layers_meki_out_proj_weight(**kwargs, data=meki_out_w)
+                if meki_out_b is not None and hasattr(model_mg, "has_layers_meki_out_proj_bias") and \
+                    model_mg.has_layers_meki_out_proj_bias(**kwargs):
+                    model_mg.set_layers_meki_out_proj_bias(**kwargs, data=meki_out_b)
+
+            if meki_mix_norm_w is not None and hasattr(model_mg, "has_layers_meki_mix_norm_module") and \
+                model_mg.has_layers_meki_mix_norm_module(**kwargs):
+                model_mg.set_layers_meki_mix_norm_weight(**kwargs, data=meki_mix_norm_w)
+                if meki_mix_norm_b is not None and hasattr(model_mg, "has_layers_meki_mix_norm_bias") and \
+                    model_mg.has_layers_meki_mix_norm_bias(**kwargs):
+                    model_mg.set_layers_meki_mix_norm_bias(**kwargs, data=meki_mix_norm_b)
+
+            if meki_post_norm_w is not None and hasattr(model_mg, "has_layers_meki_post_norm_module") and \
+                model_mg.has_layers_meki_post_norm_module(**kwargs):
+                model_mg.set_layers_meki_post_norm_weight(**kwargs, data=meki_post_norm_w)
+                if meki_post_norm_b is not None and hasattr(model_mg, "has_layers_meki_post_norm_bias") and \
+                    model_mg.has_layers_meki_post_norm_bias(**kwargs):
+                    model_mg.set_layers_meki_post_norm_bias(**kwargs, data=meki_post_norm_b)
 
 
 def set_model_layer_attn(model_mg, msg, md, **kwargs):

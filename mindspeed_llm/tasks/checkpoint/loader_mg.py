@@ -62,6 +62,12 @@ def add_arguments(parser):
                        help='Per-layer embedding hidden size (PLE). 0 disables PLE.')
     group.add_argument('--vocab-size-per-layer-input', type=int, default=None,
                        help='Vocabulary size for per-layer embeddings (PLE). Defaults to vocab size when unset.')
+    group.add_argument('--meki-dim', type=int, default=0,
+                       help='MeKi memory dimension. 0 disables MeKi.')
+    group.add_argument('--meki-alpha', type=float, default=1.0,
+                       help='Residual scaling factor for MeKi branch output.')
+    group.add_argument('--meki-beta', type=float, default=1.0,
+                       help='Context projection mixing factor for MeKi branch input.')
 
 
 def build_metadata(args, margs):
@@ -110,6 +116,9 @@ def build_metadata(args, margs):
     md.moe_layer_freq = getattr(margs, "moe_layer_freq", None)
     md.q_lora_rank = getattr(margs, "q_lora_rank", None)
     md.multi_latent_attention = getattr(margs, "multi_latent_attention", False)
+    md.meki_dim = getattr(margs, "meki_dim", 0)
+    md.meki_alpha = getattr(margs, "meki_alpha", 1.0)
+    md.meki_beta = getattr(margs, "meki_beta", 1.0)
     if md.multi_latent_attention:
         md.qk_pos_emb_head_dim = getattr(margs, "qk_pos_emb_head_dim", None)
         md.qk_head_dim = getattr(margs, "qk_head_dim", None)
@@ -154,6 +163,23 @@ def get_message_preprocess(model, args):
             model.has_embedding_per_layer_projection_norm_bias():
             message["per layer projection norm bias"] = model.get_embedding_per_layer_projection_norm_bias()
 
+    # MeKi global branch (optional).
+    if hasattr(model, "has_embedding_word_embeddings_meki_module") and \
+        model.has_embedding_word_embeddings_meki_module():
+        message["word embeddings meki"] = model.get_embedding_word_embeddings_meki_weight()
+    if hasattr(model, "has_embedding_meki_model_projection_module") and \
+        model.has_embedding_meki_model_projection_module():
+        message["meki model projection weight"] = model.get_embedding_meki_model_projection_weight()
+        if hasattr(model, "has_embedding_meki_model_projection_bias") and \
+            model.has_embedding_meki_model_projection_bias():
+            message["meki model projection bias"] = model.get_embedding_meki_model_projection_bias()
+    if hasattr(model, "has_embedding_meki_projection_norm_module") and \
+        model.has_embedding_meki_projection_norm_module():
+        message["meki projection norm weight"] = model.get_embedding_meki_projection_norm_weight()
+        if hasattr(model, "has_embedding_meki_projection_norm_bias") and \
+            model.has_embedding_meki_projection_norm_bias():
+            message["meki projection norm bias"] = model.get_embedding_meki_projection_norm_bias()
+
     return message
 
 
@@ -194,6 +220,32 @@ def get_message_layer_norm(message, model, md, **kwargs):
         if hasattr(model, "has_layers_post_per_layer_input_norm_bias") and \
             model.has_layers_post_per_layer_input_norm_bias(**kwargs):
             message["post per layer input norm bias"] = model.get_layers_post_per_layer_input_norm_bias(**kwargs)
+
+    # MeKi per-layer branch (optional).
+    if hasattr(model, "has_layers_meki_gate_proj_module") and \
+        model.has_layers_meki_gate_proj_module(**kwargs):
+        message["meki gate proj weight"] = model.get_layers_meki_gate_proj_weight(**kwargs)
+        if hasattr(model, "has_layers_meki_gate_proj_bias") and \
+            model.has_layers_meki_gate_proj_bias(**kwargs):
+            message["meki gate proj bias"] = model.get_layers_meki_gate_proj_bias(**kwargs)
+    if hasattr(model, "has_layers_meki_out_proj_module") and \
+        model.has_layers_meki_out_proj_module(**kwargs):
+        message["meki out proj weight"] = model.get_layers_meki_out_proj_weight(**kwargs)
+        if hasattr(model, "has_layers_meki_out_proj_bias") and \
+            model.has_layers_meki_out_proj_bias(**kwargs):
+            message["meki out proj bias"] = model.get_layers_meki_out_proj_bias(**kwargs)
+    if hasattr(model, "has_layers_meki_mix_norm_module") and \
+        model.has_layers_meki_mix_norm_module(**kwargs):
+        message["meki mix norm weight"] = model.get_layers_meki_mix_norm_weight(**kwargs)
+        if hasattr(model, "has_layers_meki_mix_norm_bias") and \
+            model.has_layers_meki_mix_norm_bias(**kwargs):
+            message["meki mix norm bias"] = model.get_layers_meki_mix_norm_bias(**kwargs)
+    if hasattr(model, "has_layers_meki_post_norm_module") and \
+        model.has_layers_meki_post_norm_module(**kwargs):
+        message["meki post norm weight"] = model.get_layers_meki_post_norm_weight(**kwargs)
+        if hasattr(model, "has_layers_meki_post_norm_bias") and \
+            model.has_layers_meki_post_norm_bias(**kwargs):
+            message["meki post norm bias"] = model.get_layers_meki_post_norm_bias(**kwargs)
 
     return message
 

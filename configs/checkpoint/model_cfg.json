@@ -140,7 +140,10 @@
         "rotary_base": "rope_theta",
         "kv_channels": "head_dim",
         "hidden_size_per_layer_input": "hidden_size_per_layer_input",
-        "vocab_size_per_layer_input": "vocab_size_per_layer_input"
+        "vocab_size_per_layer_input": "vocab_size_per_layer_input",
+        "meki_dim": "meki_dim",
+        "meki_alpha": "meki_alpha",
+        "meki_beta": "meki_beta"
       },
       "model_hf_key_mapping": {
         "model": "module[0]",
@@ -163,9 +166,16 @@
         "embedding_word_embeddings_per_layer": "model.embed_tokens_per_layer",
         "embedding_per_layer_model_projection": "model.per_layer_model_projection",
         "embedding_per_layer_projection_norm": "model.per_layer_projection_norm",
+        "embedding_word_embeddings_meki": "model.embed_tokens_meki",
+        "embedding_meki_model_projection": "model.meki_model_projection",
+        "embedding_meki_projection_norm": "model.meki_projection_norm",
         "layers_per_layer_input_gate": "model.layers[layer_idx].per_layer_input_gate",
         "layers_per_layer_projection": "model.layers[layer_idx].per_layer_projection",
-        "layers_post_per_layer_input_norm": "model.layers[layer_idx].post_per_layer_input_norm"
+        "layers_post_per_layer_input_norm": "model.layers[layer_idx].post_per_layer_input_norm",
+        "layers_meki_gate_proj": "model.layers[layer_idx].meki_gate_proj",
+        "layers_meki_out_proj": "model.layers[layer_idx].meki_out_proj",
+        "layers_meki_mix_norm": "model.layers[layer_idx].meki_mix_norm",
+        "layers_meki_post_norm": "model.layers[layer_idx].meki_post_norm"
       }
     },
     "glm45-air": {
