@@ -145,6 +145,24 @@ class GPTModel(MegatronCoreGPTModel):
             self.per_layer_model_projection_scale = self.config.hidden_size ** -0.5
             self.per_layer_input_scale = 2.0 ** -0.5
 
+        # MeKi model-side memory + context projection branch.
+        self.meki_dim = int(getattr(self.config, "meki_dim", 0) or 0)
+        self.use_meki = self.meki_dim > 0
+        if self.use_meki:
+            self.meki_alpha = float(getattr(self.config, "meki_alpha", 1.0))
+            self.meki_beta = float(getattr(self.config, "meki_beta", 1.0))
+            self.meki_model_projection = nn.Linear(
+                self.config.hidden_size,
+                self.config.num_layers * self.meki_dim,
+                bias=False,
+            )
+            self.meki_projection_norm = nn.LayerNorm(
+                self.meki_dim,
+                eps=self.config.layernorm_epsilon,
+            )
+            self.meki_model_projection_scale = self.config.hidden_size ** -0.5
+            self.meki_input_scale = 2.0 ** -0.5
+
         if self.mtp_process:
             self.mtp = MultiTokenPredictionBlock(config=self.config, spec=self.mtp_block_spec)
 
@@ -268,6 +286,31 @@ class GPTModel(MegatronCoreGPTModel):
 
             per_layer_inputs = (ple_token + ple_context) * self.per_layer_input_scale
 
+        meki_layer_inputs = None
+        if self.use_meki and self.pre_process:
+            if self.embedding.embed_tokens_meki is None:
+                raise RuntimeError("MeKi enabled but embedding.embed_tokens_meki is missing.")
+
+            # token memory component: [b, s, L*M] -> [s, b, L, M]
+            meki_token = self.embedding.embed_tokens_meki(input_ids).view(
+                input_ids.shape[0],
+                input_ids.shape[1],
+                self.config.num_layers,
+                self.meki_dim,
+            ).permute(1, 0, 2, 3).contiguous()
+
+            # context projection component: [s, b, h] -> [s, b, L, M]
+            meki_context = self.meki_model_projection(decoder_input) * self.meki_model_projection_scale
+            meki_context = meki_context.view(
+                decoder_input.shape[0],
+                decoder_input.shape[1],
+                self.config.num_layers,
+                self.meki_dim,
+            )
+            meki_context = self.meki_projection_norm(meki_context)
+
+            meki_layer_inputs = (meki_token + self.meki_beta * meki_context) * self.meki_input_scale
+
         # Rotary positional embeddings (embedding is None for PP intermediate devices)
         rotary_pos_emb = None
         if self.position_embedding_type == 'rope':
@@ -286,6 +329,7 @@ class GPTModel(MegatronCoreGPTModel):
             rotary_pos_emb=rotary_pos_emb,
             packed_seq_params=packed_seq_params,
             per_layer_inputs=per_layer_inputs,
+            meki_layer_inputs=meki_layer_inputs,
             **(extra_block_kwargs or {}),
         )
 

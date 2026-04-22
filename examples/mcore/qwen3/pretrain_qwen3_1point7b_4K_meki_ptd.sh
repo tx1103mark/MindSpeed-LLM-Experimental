@@ -25,7 +25,7 @@ GBS=32
 SEQ_LENGTH=4096
 TRAIN_ITERS=2000
 ROUTER_BALANCING_TYPE='softmax_topk'
-MEKI_DIM=0
+MEKI_DIM=256
 MEKI_ALPHA=1.0
 MEKI_BETA=1.0
 
@@ -117,14 +117,11 @@ OUTPUT_ARGS="
     --no-load-rng
 "
 
-MEKI_ARGS=""
-if [ "${MEKI_DIM}" -gt 0 ]; then
-    MEKI_ARGS="
+MEKI_ARGS="
     --meki-dim ${MEKI_DIM} \
     --meki-alpha ${MEKI_ALPHA} \
     --meki-beta ${MEKI_BETA}
-    "
-fi
+"
 
 torchrun $DISTRIBUTED_ARGS pretrain_gpt.py \
     $GPT_ARGS \
@@ -138,4 +135,4 @@ torchrun $DISTRIBUTED_ARGS pretrain_gpt.py \
     --load ${CKPT_LOAD_DIR} \
     --save ${CKPT_SAVE_DIR} \
     --transformer-impl local \
-    | tee logs/train_mcore_qwen3_1point7b.log
+    | tee logs/train_mcore_qwen3_1point7b_meki.log

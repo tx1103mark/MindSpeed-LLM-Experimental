@@ -254,6 +254,7 @@ def transformer_block_forward(
     packed_seq_params: PackedSeqParams = None,
     sequence_len_offset: Tensor = None,
     per_layer_inputs: Tensor = None,
+    meki_layer_inputs: Tensor = None,
 ):
     # hidden_states (float): [s, b, h]
     # attention_mask (bool): [1, 1, s, s]
@@ -325,6 +326,7 @@ def transformer_block_forward(
                     rotary_pos_emb=rotary_pos_emb,
                     packed_seq_params=packed_seq_params,
                     per_layer_inputs=per_layer_inputs,
+                    meki_layer_inputs=meki_layer_inputs,
                     **kwargs
                 )
             else:
@@ -337,6 +339,7 @@ def transformer_block_forward(
                     attention_bias=None,
                     packed_seq_params=packed_seq_params,
                     per_layer_inputs=per_layer_inputs,
+                    meki_layer_inputs=meki_layer_inputs,
                     **kwargs
                 )
         else:
@@ -348,6 +351,9 @@ def transformer_block_forward(
                 )
                 with self.offload_context, inner_fp8_context:
                     if global_args.share_kvstates:
+                        layer_idx = layer.layer_number - 1
+                        if meki_layer_inputs is not None and hasattr(layer, "set_meki_input"):
+                            layer.set_meki_input(meki_layer_inputs[:, :, layer_idx, :])
                         hidden_states, context, key_value_states = layer(
                             hidden_states=hidden_states,
                             attention_mask=attention_mask,
@@ -361,12 +367,14 @@ def transformer_block_forward(
                             packed_seq_params=packed_seq_params,
                             sequence_len_offset=sequence_len_offset,
                         )
-                        layer_idx = layer.layer_number - 1
                         if per_layer_inputs is not None and hasattr(layer, "apply_per_layer_input"):
                             hidden_states = layer.apply_per_layer_input(
                                 hidden_states, per_layer_inputs[:, :, layer_idx, :]
                             )
                     else:
+                        layer_idx = layer.layer_number - 1
+                        if meki_layer_inputs is not None and hasattr(layer, "set_meki_input"):
+                            layer.set_meki_input(meki_layer_inputs[:, :, layer_idx, :])
                         hidden_states, context = layer(
                             hidden_states=hidden_states,
                             attention_mask=attention_mask,
@@ -376,7 +384,6 @@ def transformer_block_forward(
                             inference_context=inference_context,
                             packed_seq_params=packed_seq_params,
                         )
-                        layer_idx = layer.layer_number - 1
                         if per_layer_inputs is not None and hasattr(layer, "apply_per_layer_input"):
                             hidden_states = layer.apply_per_layer_input(
                                 hidden_states, per_layer_inputs[:, :, layer_idx, :]
@@ -405,6 +412,7 @@ def _block_method_checkpointed_forward_func(
         rotary_pos_emb: Tensor,
         packed_seq_params: PackedSeqParams,
         per_layer_inputs: Tensor = None,
+        meki_layer_inputs: Tensor = None,
 ):
     """
         Forward method with activation checkpointing.
@@ -423,9 +431,12 @@ def _block_method_checkpointed_forward_func(
                 rotary_pos_emb,
                 packed_seq_params,
                 per_layer_inputs,
+                meki_layer_inputs,
         ):
             for index in range(start, end):
                 layer = self._get_layer(index)
+                if meki_layer_inputs is not None and hasattr(layer, "set_meki_input"):
+                    layer.set_meki_input(meki_layer_inputs[:, :, index, :])
                 hidden_states, context = layer(
                     hidden_states=hidden_states,
                     attention_mask=attention_mask,
@@ -464,6 +475,8 @@ def _block_method_checkpointed_forward_func(
                 context_mask,
                 rotary_pos_emb,
                 packed_seq_params,
+                per_layer_inputs,
+                meki_layer_inputs,
             )
         else:
             hidden_states, context = custom(single_layer, single_layer + 1)(
@@ -474,6 +487,7 @@ def _block_method_checkpointed_forward_func(
                 rotary_pos_emb,
                 packed_seq_params,
                 per_layer_inputs,
+                meki_layer_inputs,
             )
 
     return hidden_states

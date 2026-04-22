@@ -26,6 +26,24 @@ class LanguageModelEmbeddingFeature(MindSpeedFeature):
             default=0.1,
             help="Residual scaling factor for PLE injection. Smaller values make PLE start gentler.",
         )
+        group.add_argument(
+            "--meki-dim",
+            type=int,
+            default=0,
+            help="MeKi memory dimension. 0 disables MeKi.",
+        )
+        group.add_argument(
+            "--meki-alpha",
+            type=float,
+            default=1.0,
+            help="Residual scaling factor for MeKi branch output.",
+        )
+        group.add_argument(
+            "--meki-beta",
+            type=float,
+            default=1.0,
+            help="Scaling factor for MeKi context projection before fusion with memory lookup.",
+        )
 
     def register_patches(self, patch_manager, args):
         from mindspeed.core.models.common.embeddings.language_model_embedding import language_model_embedding_forward_wrapper

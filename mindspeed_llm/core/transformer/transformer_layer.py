@@ -15,6 +15,7 @@
 
 import math
 from typing import Any, Dict, Optional, Tuple
+import torch
 from torch import Tensor
 from torch import nn
 
@@ -69,6 +70,16 @@ class TransformerLayer(MegatronTransformerLayer):
             self.per_layer_input_gate = nn.Linear(self.config.hidden_size, self.hidden_size_per_layer_input, bias=False)
             self.per_layer_projection = nn.Linear(self.hidden_size_per_layer_input, self.config.hidden_size, bias=False)
             self.post_per_layer_input_norm = nn.LayerNorm(self.config.hidden_size, eps=self.config.layernorm_epsilon)
+
+        self.meki_dim = int(getattr(config, "meki_dim", 0) or 0)
+        self.use_meki = self.meki_dim > 0
+        self._meki_input = None
+        if self.use_meki:
+            self.meki_alpha = float(getattr(config, "meki_alpha", 1.0))
+            self.meki_gate_proj = nn.Linear(self.config.hidden_size, self.meki_dim, bias=False)
+            self.meki_out_proj = nn.Linear(self.meki_dim, self.config.hidden_size, bias=False)
+            self.meki_mix_norm = nn.LayerNorm(self.meki_dim, eps=self.config.layernorm_epsilon)
+            self.meki_post_norm = nn.LayerNorm(self.config.hidden_size, eps=self.config.layernorm_epsilon)
 
     def _forward_attention(
         self,
@@ -216,6 +227,21 @@ class TransformerLayer(MegatronTransformerLayer):
             mlp_output = mlp_output * (args.scale_depth / math.sqrt(args.num_layers))
             mlp_output_with_bias = (mlp_output, mlp_bias)
 
+        if self.use_meki:
+            if self._meki_input is None:
+                if self.config.pipeline_model_parallel_size == 1:
+                    raise RuntimeError(f"MeKi enabled but meki_input is None at layer {self.layer_number}.")
+            else:
+                meki_embedding = self.meki_mix_norm(self._meki_input)
+                meki_fused = torch.sigmoid(self.meki_gate_proj(pre_mlp_layernorm_output)) + meki_embedding
+                meki_output = self.meki_out_proj(meki_fused)
+                meki_output = self.meki_post_norm(meki_output)
+                mlp_output_with_bias = (
+                    mlp_output_with_bias[0] + self.meki_alpha * meki_output,
+                    mlp_output_with_bias[1],
+                )
+        self._meki_input = None
+
         # inside the module provided in the `bias_dropout_add_spec` module?
         with self.bias_dropout_add_exec_handler():
             hidden_states = self.mlp_bda(self.training, self.config.bias_dropout_fusion)(
@@ -248,3 +274,7 @@ class TransformerLayer(MegatronTransformerLayer):
         hidden_states = self.post_per_layer_input_norm(hidden_states)
         hidden_states = residual + hidden_states * self.ple_alpha
         return hidden_states
+
+    def set_meki_input(self, meki_input: Optional[Tensor]):
+        """Set layer-specific MeKi input before running the MLP branch."""
+        self._meki_input = meki_input
