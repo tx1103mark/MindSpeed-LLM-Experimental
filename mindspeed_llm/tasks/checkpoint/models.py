@@ -407,6 +407,8 @@ class ModelBase(abc.ABC):
             )
             # PLE LayerNorm is affine; if bias is not copied, to_empty() can leave NaNs.
             if hasattr(self, "set_layers_post_per_layer_input_norm_bias") and \
+                hasattr(self, "has_layers_post_per_layer_input_norm_bias") and \
+                self.has_layers_post_per_layer_input_norm_bias(layer_idx=dst_layer_idx) and \
                 hasattr(src_model, "has_layers_post_per_layer_input_norm_bias") and \
                 src_model.has_layers_post_per_layer_input_norm_bias(layer_idx=src_layer_idx):
                 self.set_layers_post_per_layer_input_norm_bias(
@@ -414,6 +416,8 @@ class ModelBase(abc.ABC):
                     data=src_model.get_layers_post_per_layer_input_norm_bias(layer_idx=src_layer_idx),
                 )
             elif hasattr(self, "set_layers_post_per_layer_input_norm_bias") and \
+                hasattr(self, "has_layers_post_per_layer_input_norm_bias") and \
+                self.has_layers_post_per_layer_input_norm_bias(layer_idx=dst_layer_idx) and \
                 hasattr(self, "get_layers_post_per_layer_input_norm_bias"):
                 bias = self.get_layers_post_per_layer_input_norm_bias(layer_idx=dst_layer_idx)
                 self.set_layers_post_per_layer_input_norm_bias(
