@@ -287,6 +287,16 @@ class ModelBase(abc.ABC):
                 bias = self.get_embedding_meki_projection_norm_bias()
                 self.set_embedding_meki_projection_norm_bias(data=torch.zeros_like(bias))
 
+        # Fail fast: source has MeKi but destination HF graph does not expose MeKi modules.
+        if hasattr(src_model, "has_embedding_word_embeddings_meki_module") and \
+            src_model.has_embedding_word_embeddings_meki_module() and \
+            (not hasattr(self, "has_embedding_word_embeddings_meki_module") or
+             not self.has_embedding_word_embeddings_meki_module()):
+            raise AssertionError(
+                "Source checkpoint has MeKi embeddings, but destination model has no MeKi modules. "
+                "Check HF config/modeling remote-code loading."
+            )
+
     def set_postprocess_state(self, src_model):
         final_layernorm_weight = src_model.get_final_layernorm_weight()
         self.set_final_layernorm_weight(data=final_layernorm_weight)
@@ -805,30 +815,80 @@ class HuggingfaceModel(ModelBase):
             logger.info(f"[INFO] When using noop_layer, origin layers from huggingface is {self.args.num_layers}, "
                         f"megatron_ckpt has {mg_num_layers} with noop layer {self.args.noop_layers}")
 
+    def _get_hf_load_dir(self):
+        return self.args_cmd.save_dir if self.args_cmd.save_model_type == "hf" else self.args_cmd.load_dir
+
+    def _maybe_enable_qwen3_remote_code(self, load_dir):
+        # For MeKi conversion, we must instantiate local custom Qwen3 modules
+        # (modeling_qwen3.py/configuration_qwen3.py). Otherwise AutoModel may
+        # load upstream transformers qwen3 without MeKi modules.
+        if self.args_cmd.model_type_hf != "qwen3":
+            return
+        if int(getattr(self.args_cmd, "meki_dim", 0) or 0) <= 0:
+            return
+
+        cfg_path = os.path.join(load_dir, "config.json")
+        model_py = os.path.join(load_dir, "modeling_qwen3.py")
+        config_py = os.path.join(load_dir, "configuration_qwen3.py")
+        if not (os.path.exists(cfg_path) and os.path.exists(model_py) and os.path.exists(config_py)):
+            return
+
+        with open(cfg_path, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+
+        auto_map = cfg.get("auto_map", {})
+        changed = False
+        if auto_map.get("AutoConfig") != "configuration_qwen3.Qwen3Config":
+            auto_map["AutoConfig"] = "configuration_qwen3.Qwen3Config"
+            changed = True
+        if auto_map.get("AutoModel") != "modeling_qwen3.Qwen3Model":
+            auto_map["AutoModel"] = "modeling_qwen3.Qwen3Model"
+            changed = True
+        if auto_map.get("AutoModelForCausalLM") != "modeling_qwen3.Qwen3ForCausalLM":
+            auto_map["AutoModelForCausalLM"] = "modeling_qwen3.Qwen3ForCausalLM"
+            changed = True
+        if changed:
+            cfg["auto_map"] = auto_map
+            with open(cfg_path, "w", encoding="utf-8") as f:
+                json.dump(cfg, f, ensure_ascii=False, indent=2)
+                f.write("\n")
+            logger.info(f"[INFO] Enabled qwen3 remote-code auto_map for MeKi in {cfg_path}")
+
+    def _assert_meki_modules_loaded(self, hf_model):
+        if self.args_cmd.model_type_hf != "qwen3":
+            return
+        if int(getattr(self.args_cmd, "meki_dim", 0) or 0) <= 0:
+            return
+        has_meki = hasattr(getattr(hf_model, "model", None), "embed_tokens_meki")
+        if not has_meki:
+            raise AssertionError(
+                "MeKi is enabled (meki_dim>0) but loaded HF qwen3 model does not contain MeKi modules. "
+                "Please ensure save_dir contains custom modeling_qwen3.py/configuration_qwen3.py and config.json "
+                "auto_map points to them."
+            )
+
     def get_modules_from_config(self, device_map="cpu", trust_remote_code=True):
         # Load Huggingface model.
-        if self.args_cmd.save_model_type == "hf":
-            load_dir = self.args_cmd.save_dir
-        else:
-            load_dir = self.args_cmd.load_dir
+        load_dir = self._get_hf_load_dir()
+        self._maybe_enable_qwen3_remote_code(load_dir)
         config = AutoConfig.from_pretrained(load_dir, trust_remote_code=trust_remote_code)
         with torch.device("meta"):
             hf_model = AutoModelForCausalLM.from_config(config, trust_remote_code=trust_remote_code)
         hf_model.to_empty(device=device_map)
+        self._assert_meki_modules_loaded(hf_model)
         self.module = [hf_model]
         if hasattr(self.args, "torch_dtype") and self.args.torch_dtype in ["float16", "bfloat16"]:
             self.module[0] = self.module[0].to(eval(f'torch.{self.args.torch_dtype}'))
 
     def get_modules_from_pretrained(self, device_map="cpu", trust_remote_code=True):
         # Load Huggingface model.
-        if self.args_cmd.save_model_type == "hf":
-            load_dir = self.args_cmd.save_dir
-        else:
-            load_dir = self.args_cmd.load_dir
+        load_dir = self._get_hf_load_dir()
+        self._maybe_enable_qwen3_remote_code(load_dir)
 
         self.module = [AutoModelForCausalLM.from_pretrained(
             load_dir, device_map=device_map, trust_remote_code=trust_remote_code, local_files_only=True
         )]
+        self._assert_meki_modules_loaded(self.module[0])
 
         if self.args_cmd.save_lora_to_hf:
             lora_config = LoraConfig(
