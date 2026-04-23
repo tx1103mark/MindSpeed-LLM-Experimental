@@ -230,6 +230,8 @@ class ModelBase(abc.ABC):
                     data=src_model.get_embedding_per_layer_projection_norm_bias()
                 )
             elif hasattr(self, "set_embedding_per_layer_projection_norm_bias") and \
+                hasattr(self, "has_embedding_per_layer_projection_norm_bias") and \
+                self.has_embedding_per_layer_projection_norm_bias() and \
                 hasattr(self, "get_embedding_per_layer_projection_norm_bias"):
                 bias = self.get_embedding_per_layer_projection_norm_bias()
                 self.set_embedding_per_layer_projection_norm_bias(data=torch.zeros_like(bias))
@@ -279,6 +281,8 @@ class ModelBase(abc.ABC):
                     data=src_model.get_embedding_meki_projection_norm_bias()
                 )
             elif hasattr(self, "set_embedding_meki_projection_norm_bias") and \
+                hasattr(self, "has_embedding_meki_projection_norm_bias") and \
+                self.has_embedding_meki_projection_norm_bias() and \
                 hasattr(self, "get_embedding_meki_projection_norm_bias"):
                 bias = self.get_embedding_meki_projection_norm_bias()
                 self.set_embedding_meki_projection_norm_bias(data=torch.zeros_like(bias))
@@ -489,6 +493,8 @@ class ModelBase(abc.ABC):
                 data=src_model.get_layers_meki_mix_norm_weight(layer_idx=src_layer_idx),
             )
             if hasattr(self, "set_layers_meki_mix_norm_bias") and \
+                hasattr(self, "has_layers_meki_mix_norm_bias") and \
+                self.has_layers_meki_mix_norm_bias(layer_idx=dst_layer_idx) and \
                 hasattr(src_model, "has_layers_meki_mix_norm_bias") and \
                 src_model.has_layers_meki_mix_norm_bias(layer_idx=src_layer_idx):
                 self.set_layers_meki_mix_norm_bias(
@@ -496,6 +502,8 @@ class ModelBase(abc.ABC):
                     data=src_model.get_layers_meki_mix_norm_bias(layer_idx=src_layer_idx),
                 )
             elif hasattr(self, "set_layers_meki_mix_norm_bias") and \
+                hasattr(self, "has_layers_meki_mix_norm_bias") and \
+                self.has_layers_meki_mix_norm_bias(layer_idx=dst_layer_idx) and \
                 hasattr(self, "get_layers_meki_mix_norm_bias"):
                 bias = self.get_layers_meki_mix_norm_bias(layer_idx=dst_layer_idx)
                 self.set_layers_meki_mix_norm_bias(
@@ -512,6 +520,8 @@ class ModelBase(abc.ABC):
                 data=src_model.get_layers_meki_post_norm_weight(layer_idx=src_layer_idx),
             )
             if hasattr(self, "set_layers_meki_post_norm_bias") and \
+                hasattr(self, "has_layers_meki_post_norm_bias") and \
+                self.has_layers_meki_post_norm_bias(layer_idx=dst_layer_idx) and \
                 hasattr(src_model, "has_layers_meki_post_norm_bias") and \
                 src_model.has_layers_meki_post_norm_bias(layer_idx=src_layer_idx):
                 self.set_layers_meki_post_norm_bias(
@@ -519,6 +529,8 @@ class ModelBase(abc.ABC):
                     data=src_model.get_layers_meki_post_norm_bias(layer_idx=src_layer_idx),
                 )
             elif hasattr(self, "set_layers_meki_post_norm_bias") and \
+                hasattr(self, "has_layers_meki_post_norm_bias") and \
+                self.has_layers_meki_post_norm_bias(layer_idx=dst_layer_idx) and \
                 hasattr(self, "get_layers_meki_post_norm_bias"):
                 bias = self.get_layers_meki_post_norm_bias(layer_idx=dst_layer_idx)
                 self.set_layers_meki_post_norm_bias(
