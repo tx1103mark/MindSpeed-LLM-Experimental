@@ -854,6 +854,39 @@ class HuggingfaceModel(ModelBase):
                 f.write("\n")
             logger.info(f"[INFO] Enabled qwen3 remote-code auto_map for MeKi in {cfg_path}")
 
+    def _maybe_rewrite_qwen3_remote_imports(self, load_dir):
+        """Rewrite package-relative imports in copied qwen3 remote code files.
+
+        Files copied from transformers source tree may contain imports like
+        `from ...modeling_rope_utils import ...`, which break when loaded via
+        dynamic module from a standalone HF directory.
+        """
+        if self.args_cmd.model_type_hf != "qwen3":
+            return
+
+        def _rewrite_file(path):
+            if not os.path.exists(path):
+                return
+            with open(path, "r", encoding="utf-8") as f:
+                text = f.read()
+
+            # Keep local relative import to configuration file; rewrite only
+            # triple-dot package imports to absolute transformers imports.
+            new_text = re.sub(
+                r"^from\s+\.\.\.([a-zA-Z0-9_\.]+)\s+import\s+",
+                r"from transformers.\1 import ",
+                text,
+                flags=re.MULTILINE,
+            )
+
+            if new_text != text:
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(new_text)
+                logger.info(f"[INFO] Rewrote qwen3 remote-code imports in {path}")
+
+        _rewrite_file(os.path.join(load_dir, "configuration_qwen3.py"))
+        _rewrite_file(os.path.join(load_dir, "modeling_qwen3.py"))
+
     def _assert_meki_modules_loaded(self, hf_model):
         if self.args_cmd.model_type_hf != "qwen3":
             return
@@ -871,6 +904,7 @@ class HuggingfaceModel(ModelBase):
         # Load Huggingface model.
         load_dir = self._get_hf_load_dir()
         self._maybe_enable_qwen3_remote_code(load_dir)
+        self._maybe_rewrite_qwen3_remote_imports(load_dir)
         config = AutoConfig.from_pretrained(load_dir, trust_remote_code=trust_remote_code)
         with torch.device("meta"):
             hf_model = AutoModelForCausalLM.from_config(config, trust_remote_code=trust_remote_code)
@@ -884,6 +918,7 @@ class HuggingfaceModel(ModelBase):
         # Load Huggingface model.
         load_dir = self._get_hf_load_dir()
         self._maybe_enable_qwen3_remote_code(load_dir)
+        self._maybe_rewrite_qwen3_remote_imports(load_dir)
 
         self.module = [AutoModelForCausalLM.from_pretrained(
             load_dir, device_map=device_map, trust_remote_code=trust_remote_code, local_files_only=True
