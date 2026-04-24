@@ -668,6 +668,48 @@ def save_huggingface(args, model):
     args_cmd = model_hf.get_args_cmd()
 
     model_hf.update_module(model)
+    hf_item = model_hf.get_model_item()
+
+    def _trace_head_embed(prefix):
+        try:
+            if not (hasattr(hf_item, "model") and hasattr(hf_item.model, "embed_tokens") and hasattr(hf_item, "lm_head")):
+                logger.info(f"[TRACE] {prefix} head/embed inspect skipped (missing model.embed_tokens or lm_head)")
+                return
+            emb = hf_item.model.embed_tokens.weight
+            head = hf_item.lm_head.weight
+            same_shape = tuple(emb.shape) == tuple(head.shape)
+            if not same_shape:
+                logger.info(f"[TRACE] {prefix} shape_mismatch embed={tuple(emb.shape)} lm_head={tuple(head.shape)}")
+                return
+            # Small sampled diff to avoid heavy full-tensor comparison.
+            r = min(32, emb.shape[0])
+            c = min(32, emb.shape[1])
+            emb_s = emb[:r, :c].detach().float().cpu()
+            head_s = head[:r, :c].detach().float().cpu()
+            max_abs = (emb_s - head_s).abs().max().item()
+            mean_abs = (emb_s - head_s).abs().mean().item()
+            same_ptr = emb.data_ptr() == head.data_ptr()
+            logger.info(
+                f"[TRACE] {prefix} sampled_head_vs_embed max_abs={max_abs:.6e} mean_abs={mean_abs:.6e} "
+                f"same_storage={same_ptr}"
+            )
+        except Exception as e:
+            logger.warning(f"[TRACE] {prefix} head/embed inspect failed: {e}")
+
+    _trace_head_embed("before_tie")
+    src_untie = None
+    if hasattr(model, "get_args"):
+        src_untie = getattr(model.get_args(), "untie_embeddings_and_output_weights", None)
+    if src_untie is not None and hasattr(hf_item, "config"):
+        hf_item.config.tie_word_embeddings = not bool(src_untie)
+        logger.info(f"[INFO] Set HF config.tie_word_embeddings={hf_item.config.tie_word_embeddings} "
+                    f"(from MG untie_embeddings_and_output_weights={src_untie})")
+        if hf_item.config.tie_word_embeddings and hasattr(hf_item, "tie_weights"):
+            try:
+                hf_item.tie_weights()
+            except Exception as e:
+                logger.warning(f"[WARN] tie_weights() failed, continue with copied weights: {e}")
+    _trace_head_embed("after_tie")
 
     save_dir = os.path.join(args_cmd.save_dir, 'mg2hf')
     logger.info(f'save weight to {save_dir}')

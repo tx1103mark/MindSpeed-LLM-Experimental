@@ -300,14 +300,38 @@ class ModelBase(abc.ABC):
     def set_postprocess_state(self, src_model):
         final_layernorm_weight = src_model.get_final_layernorm_weight()
         self.set_final_layernorm_weight(data=final_layernorm_weight)
-        if self.args.untie_embeddings_and_output_weights and \
-            self.has_output_layer_module() and src_model.has_output_layer_module():
+        # Use source MG checkpoint semantics as the source of truth.
+        src_untie = self.args.untie_embeddings_and_output_weights
+        if hasattr(src_model, "get_args"):
+            src_margs = src_model.get_args()
+            src_untie = getattr(src_margs, "untie_embeddings_and_output_weights", src_untie)
+        logger.info(
+            f"[TRACE] postprocess source untie_embeddings_and_output_weights={src_untie}, "
+            f"dst_has_output_layer_module={self.has_output_layer_module() if hasattr(self, 'has_output_layer_module') else False}, "
+            f"src_has_output_layer_module={src_model.has_output_layer_module() if hasattr(src_model, 'has_output_layer_module') else False}"
+        )
+
+        if src_untie and self.has_output_layer_module() and src_model.has_output_layer_module():
             output_layer_weight = src_model.get_output_layer_weight()
             if output_layer_weight.size(0) > self.get_output_layer_weight().size(0):
                 logger.info(f"Source output layer weight size: {output_layer_weight.size()} "
                             f"Target output layer weight size: {self.get_output_layer_weight().size()}")
                 output_layer_weight = output_layer_weight[:self.get_output_layer_weight().size(0), :]
             self.set_output_layer_weight(data=output_layer_weight)
+            logger.info("[TRACE] postprocess action=copy_output_layer_from_source_mg")
+        elif (not src_untie) and self.has_output_layer_module():
+            # Tied mode: align lm_head to input embeddings to avoid random lm_head
+            # when HF config defaults to untied.
+            emb_weight = self.get_embedding_word_embeddings_weight()
+            target_rows = self.get_output_layer_weight().size(0)
+            if emb_weight.size(0) > target_rows:
+                emb_weight = emb_weight[:target_rows, :]
+            self.set_output_layer_weight(data=emb_weight)
+            logger.info("[TRACE] postprocess action=align_output_layer_with_input_embeddings")
+        elif src_untie and (not self.has_output_layer_module()):
+            logger.warning("[TRACE] postprocess action=skip_output_layer_copy because destination has no output_layer module")
+        elif (not src_untie) and (not self.has_output_layer_module()):
+            logger.info("[TRACE] postprocess action=skip_output_layer_align because destination has no output_layer module")
         if self.has_final_layernorm_bias():
             final_layernorm_bias = src_model.get_final_layernorm_bias()
             self.set_final_layernorm_bias(data=final_layernorm_bias)
