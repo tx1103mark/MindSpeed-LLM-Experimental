@@ -916,7 +916,9 @@ class HuggingfaceModel(ModelBase):
             return
         if int(getattr(self.args_cmd, "meki_dim", 0) or 0) <= 0:
             return
-        has_meki = hasattr(getattr(hf_model, "model", None), "embed_tokens_meki")
+        model_obj = getattr(hf_model, "model", None)
+        layers = getattr(model_obj, "layers", None)
+        has_meki = layers is not None and len(layers) > 0 and hasattr(layers[0], "meki_embeddings")
         if not has_meki:
             raise AssertionError(
                 "MeKi is enabled (meki_dim>0) but loaded HF qwen3 model does not contain MeKi modules. "
@@ -1485,6 +1487,7 @@ class MegatronModel(ModelBase):
             self.args.first_k_dense_replace = getattr(hf_args, "first_k_dense_replace", None)
             self.args.moe_layer_freq = getattr(hf_args, "moe_layer_freq", None)
             self.args.multi_latent_attention = getattr(hf_args, "multi_latent_attention", False)
+            self.args.ple_alpha = getattr(hf_args, "ple_alpha", 0.1)
             self.args.meki_dim = getattr(hf_args, "meki_dim", 0)
             self.args.meki_alpha = getattr(hf_args, "meki_alpha", 1.0)
             self.args.meki_beta = getattr(hf_args, "meki_beta", 1.0)
@@ -1533,6 +1536,7 @@ class MegatronModel(ModelBase):
         self.args.shared_expert_gate = getattr(self.args_megatron_checkpoint, "shared_expert_gate", False)
         self.args.fc_type = getattr(self.args_megatron_checkpoint, "fc_type", None)
         self.args.num_layer_list = getattr(self.args_megatron_checkpoint, "num_layer_list", None)
+        self.args.ple_alpha = getattr(self.args_megatron_checkpoint, "ple_alpha", 0.1)
         self.args.meki_dim = getattr(self.args_megatron_checkpoint, "meki_dim", 0)
         self.args.meki_alpha = getattr(self.args_megatron_checkpoint, "meki_alpha", 1.0)
         self.args.meki_beta = getattr(self.args_megatron_checkpoint, "meki_beta", 1.0)
@@ -1554,6 +1558,7 @@ class MegatronModel(ModelBase):
         self.args.vocab_size_per_layer_input = getattr(self.args_cmd, 'vocab_size_per_layer_input', None)
         if self.args.vocab_size_per_layer_input is None:
             self.args.vocab_size_per_layer_input = getattr(self.args, 'vocab_size', None)
+        self.args.ple_alpha = getattr(self.args_cmd, 'ple_alpha', 0.1)
         self.args.meki_dim = getattr(self.args_cmd, 'meki_dim', 0) or 0
         self.args.meki_alpha = getattr(self.args_cmd, 'meki_alpha', 1.0)
         self.args.meki_beta = getattr(self.args_cmd, 'meki_beta', 1.0)
@@ -1888,6 +1893,12 @@ class MegatronMCoreModel(MegatronModel):
             "layers_meki_out_proj": module_layer + "meki_out_proj",
             "layers_meki_mix_norm": module_layer + "meki_mix_norm",
             "layers_meki_post_norm": module_layer + "meki_post_norm",
+            "layers_meki_embeddings": module_layer + "meki_embeddings",
+            "layers_meki_word_gate_proj": module_layer + "meki_word_gate_proj",
+            "layers_meki_word_up_proj": module_layer + "meki_word_up_proj",
+            "layers_meki_word_down_proj": module_layer + "meki_word_down_proj",
+            "layers_meki_alpha_scale": module_layer + "meki_alpha_scale",
+            "layers_meki_beta_scale": module_layer + "meki_beta_scale",
             "layers_self_attention_post_mlp_layernorm": module_layer + "post_mlp_layernorm",
             "final_layernorm": "decoder.final_layernorm",
             "output_layer": "output_layer"

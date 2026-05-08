@@ -255,6 +255,8 @@ def transformer_block_forward(
     sequence_len_offset: Tensor = None,
     per_layer_inputs: Tensor = None,
     meki_layer_inputs: Tensor = None,
+    meki_input_ids: Tensor = None,
+    meki_word_emb: Tensor = None,
 ):
     # hidden_states (float): [s, b, h]
     # attention_mask (bool): [1, 1, s, s]
@@ -327,6 +329,8 @@ def transformer_block_forward(
                     packed_seq_params=packed_seq_params,
                     per_layer_inputs=per_layer_inputs,
                     meki_layer_inputs=meki_layer_inputs,
+                    meki_input_ids=meki_input_ids,
+                    meki_word_emb=meki_word_emb,
                     **kwargs
                 )
             else:
@@ -340,6 +344,8 @@ def transformer_block_forward(
                     packed_seq_params=packed_seq_params,
                     per_layer_inputs=per_layer_inputs,
                     meki_layer_inputs=meki_layer_inputs,
+                    meki_input_ids=meki_input_ids,
+                    meki_word_emb=meki_word_emb,
                     **kwargs
                 )
         else:
@@ -354,6 +360,8 @@ def transformer_block_forward(
                         layer_idx = layer.layer_number - 1
                         if meki_layer_inputs is not None and hasattr(layer, "set_meki_input"):
                             layer.set_meki_input(meki_layer_inputs[:, :, layer_idx, :])
+                        if hasattr(layer, "set_meki_aux_inputs"):
+                            layer.set_meki_aux_inputs(meki_input_ids, meki_word_emb)
                         hidden_states, context, key_value_states = layer(
                             hidden_states=hidden_states,
                             attention_mask=attention_mask,
@@ -375,6 +383,8 @@ def transformer_block_forward(
                         layer_idx = layer.layer_number - 1
                         if meki_layer_inputs is not None and hasattr(layer, "set_meki_input"):
                             layer.set_meki_input(meki_layer_inputs[:, :, layer_idx, :])
+                        if hasattr(layer, "set_meki_aux_inputs"):
+                            layer.set_meki_aux_inputs(meki_input_ids, meki_word_emb)
                         hidden_states, context = layer(
                             hidden_states=hidden_states,
                             attention_mask=attention_mask,
@@ -413,6 +423,8 @@ def _block_method_checkpointed_forward_func(
         packed_seq_params: PackedSeqParams,
         per_layer_inputs: Tensor = None,
         meki_layer_inputs: Tensor = None,
+        meki_input_ids: Tensor = None,
+        meki_word_emb: Tensor = None,
 ):
     """
         Forward method with activation checkpointing.
@@ -432,11 +444,15 @@ def _block_method_checkpointed_forward_func(
                 packed_seq_params,
                 per_layer_inputs,
                 meki_layer_inputs,
+                meki_input_ids,
+                meki_word_emb,
         ):
             for index in range(start, end):
                 layer = self._get_layer(index)
                 if meki_layer_inputs is not None and hasattr(layer, "set_meki_input"):
                     layer.set_meki_input(meki_layer_inputs[:, :, index, :])
+                if hasattr(layer, "set_meki_aux_inputs"):
+                    layer.set_meki_aux_inputs(meki_input_ids, meki_word_emb)
                 hidden_states, context = layer(
                     hidden_states=hidden_states,
                     attention_mask=attention_mask,
@@ -477,6 +493,8 @@ def _block_method_checkpointed_forward_func(
                 packed_seq_params,
                 per_layer_inputs,
                 meki_layer_inputs,
+                meki_input_ids,
+                meki_word_emb,
             )
         else:
             hidden_states, context = custom(single_layer, single_layer + 1)(
@@ -488,6 +506,8 @@ def _block_method_checkpointed_forward_func(
                 packed_seq_params,
                 per_layer_inputs,
                 meki_layer_inputs,
+                meki_input_ids,
+                meki_word_emb,
             )
 
     return hidden_states

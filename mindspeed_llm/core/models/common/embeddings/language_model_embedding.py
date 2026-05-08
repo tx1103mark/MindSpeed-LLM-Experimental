@@ -84,15 +84,5 @@ def language_model_embedding_init_func(
     else:
         self.embed_tokens_per_layer = None
 
-    # MeKi memory table: [vocab_size, num_layers * meki_dim].
-    self.meki_dim = int(getattr(self.config, "meki_dim", 0) or 0)
-    if self.meki_dim > 0:
-        self.embed_tokens_meki = torch.nn.Embedding(
-            self.vocab_size,
-            self.config.num_layers * self.meki_dim,
-            padding_idx=None,
-        )
-        if self.config.perform_initialization:
-            self.config.init_method(self.embed_tokens_meki.weight)
-    else:
-        self.embed_tokens_meki = None
+    # Kept for backward compatibility with existing checkpoint accessors.
+    self.embed_tokens_meki = None

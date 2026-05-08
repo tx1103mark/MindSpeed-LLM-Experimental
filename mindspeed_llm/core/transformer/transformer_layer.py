@@ -18,6 +18,7 @@ from typing import Any, Dict, Optional, Tuple
 import torch
 from torch import Tensor
 from torch import nn
+import torch.nn.functional as F
 
 from megatron.core import tensor_parallel
 from megatron.core.transformer.transformer_layer import TransformerLayerSubmodules
@@ -74,12 +75,26 @@ class TransformerLayer(MegatronTransformerLayer):
         self.meki_dim = int(getattr(config, "meki_dim", 0) or 0)
         self.use_meki = self.meki_dim > 0
         self._meki_input = None
+        self._meki_input_ids = None
+        self._meki_word_emb = None
         if self.use_meki:
-            self.meki_alpha = float(getattr(config, "meki_alpha", 1.0))
             self.meki_gate_proj = nn.Linear(self.config.hidden_size, self.meki_dim, bias=False)
             self.meki_out_proj = nn.Linear(self.meki_dim, self.config.hidden_size, bias=False)
-            self.meki_mix_norm = nn.LayerNorm(self.meki_dim, eps=self.config.layernorm_epsilon)
-            self.meki_post_norm = nn.LayerNorm(self.config.hidden_size, eps=self.config.layernorm_epsilon)
+            meki_intermediate = max(self.config.hidden_size // 2, self.meki_dim)
+            self.meki_word_gate_proj = nn.Linear(self.config.hidden_size, meki_intermediate, bias=False)
+            self.meki_word_up_proj = nn.Linear(self.config.hidden_size, meki_intermediate, bias=False)
+            self.meki_word_down_proj = nn.Linear(meki_intermediate, self.meki_dim, bias=False)
+            vocab_size = int(
+                getattr(self.config, "vocab_size", getattr(self.config, "padded_vocab_size", 0))
+                or getattr(self.config, "padded_vocab_size", 0)
+            )
+            if vocab_size <= 0:
+                raise RuntimeError("MeKi enabled but vocab_size is not configured.")
+            self.meki_embeddings = nn.Embedding(vocab_size, self.meki_dim)
+            self.meki_mix_norm = nn.RMSNorm(self.meki_dim, eps=self.config.layernorm_epsilon)
+            self.meki_post_norm = nn.RMSNorm(self.config.hidden_size, eps=self.config.layernorm_epsilon)
+            self.meki_alpha_scale = nn.Parameter(torch.tensor(float(getattr(config, "meki_alpha", 1.0))))
+            self.meki_beta_scale = nn.Parameter(torch.tensor(float(getattr(config, "meki_beta", 1.0))))
 
     def _forward_attention(
         self,
@@ -228,19 +243,28 @@ class TransformerLayer(MegatronTransformerLayer):
             mlp_output_with_bias = (mlp_output, mlp_bias)
 
         if self.use_meki:
-            if self._meki_input is None:
-                if self.config.pipeline_model_parallel_size == 1:
-                    raise RuntimeError(f"MeKi enabled but meki_input is None at layer {self.layer_number}.")
-            else:
-                meki_embedding = self.meki_mix_norm(self._meki_input)
-                meki_fused = torch.sigmoid(self.meki_gate_proj(pre_mlp_layernorm_output)) + meki_embedding
-                meki_output = self.meki_out_proj(meki_fused)
-                meki_output = self.meki_post_norm(meki_output)
-                mlp_output_with_bias = (
-                    mlp_output_with_bias[0] + self.meki_alpha * meki_output,
-                    mlp_output_with_bias[1],
-                )
+            if self._meki_input_ids is None or self._meki_word_emb is None:
+                raise RuntimeError(f"MeKi enabled but auxiliary inputs are missing at layer {self.layer_number}.")
+            static_embedding = self.meki_embeddings(self._meki_input_ids).permute(1, 0, 2).contiguous()
+            dynamic_hidden = F.silu(self.meki_word_gate_proj(self._meki_word_emb)) * self.meki_word_up_proj(
+                self._meki_word_emb
+            )
+            dynamic_embedding = self.meki_word_down_proj(dynamic_hidden)
+            meki_embedding = self.meki_mix_norm(static_embedding + dynamic_embedding * self.meki_beta_scale)
+            meki_embedding = meki_embedding * self.meki_alpha_scale
+            if self._meki_input is not None:
+                meki_embedding = self.meki_mix_norm(self._meki_input + dynamic_embedding * self.meki_beta_scale)
+                meki_embedding = meki_embedding * self.meki_alpha_scale
+            meki_fused = torch.sigmoid(self.meki_gate_proj(pre_mlp_layernorm_output)) + meki_embedding
+            meki_output = self.meki_out_proj(meki_fused)
+            meki_output = self.meki_post_norm(meki_output)
+            mlp_output_with_bias = (
+                mlp_output_with_bias[0] + meki_output,
+                mlp_output_with_bias[1],
+            )
         self._meki_input = None
+        self._meki_input_ids = None
+        self._meki_word_emb = None
 
         # inside the module provided in the `bias_dropout_add_spec` module?
         with self.bias_dropout_add_exec_handler():
@@ -278,3 +302,8 @@ class TransformerLayer(MegatronTransformerLayer):
     def set_meki_input(self, meki_input: Optional[Tensor]):
         """Set layer-specific MeKi input before running the MLP branch."""
         self._meki_input = meki_input
+
+    def set_meki_aux_inputs(self, meki_input_ids: Optional[Tensor], meki_word_emb: Optional[Tensor]):
+        """Set MeKi auxiliary inputs shared across layers."""
+        self._meki_input_ids = meki_input_ids
+        self._meki_word_emb = meki_word_emb

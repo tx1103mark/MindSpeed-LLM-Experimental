@@ -83,6 +83,18 @@ class Qwen3MLP(nn.Module):
         return down_proj
 
 
+class Qwen3MeKiMLP(nn.Module):
+    def __init__(self, hidden_size: int, intermediate_size: int, output_size: int):
+        super().__init__()
+        self.gate_proj = nn.Linear(hidden_size, intermediate_size, bias=False)
+        self.up_proj = nn.Linear(hidden_size, intermediate_size, bias=False)
+        self.down_proj = nn.Linear(intermediate_size, output_size, bias=False)
+        self.act_fn = ACT2FN["silu"]
+
+    def forward(self, x):
+        return self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x))
+
+
 def rotate_half(x):
     """Rotates half the hidden dims of the input."""
     x1 = x[..., : x.shape[-1] // 2]
@@ -244,11 +256,19 @@ class Qwen3DecoderLayer(GradientCheckpointingLayer):
         self.meki_dim = int(getattr(config, "meki_dim", 0) or 0)
         self.use_meki = self.meki_dim > 0
         if self.use_meki:
-            self.meki_alpha = float(getattr(config, "meki_alpha", 1.0))
             self.meki_gate_proj = nn.Linear(config.hidden_size, self.meki_dim, bias=False)
             self.meki_out_proj = nn.Linear(self.meki_dim, config.hidden_size, bias=False)
-            self.meki_mix_norm = nn.LayerNorm(self.meki_dim, eps=config.rms_norm_eps)
-            self.meki_post_norm = nn.LayerNorm(config.hidden_size, eps=config.rms_norm_eps)
+            meki_intermediate = max(config.hidden_size // 2, self.meki_dim)
+            self.meki_word_emb_projection = Qwen3MeKiMLP(
+                hidden_size=config.hidden_size,
+                intermediate_size=meki_intermediate,
+                output_size=self.meki_dim,
+            )
+            self.meki_embeddings = nn.Embedding(config.vocab_size, self.meki_dim)
+            self.meki_mix_norm = Qwen3RMSNorm(self.meki_dim, eps=config.rms_norm_eps)
+            self.meki_post_norm = Qwen3RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+            self.meki_alpha_scale = nn.Parameter(torch.tensor(float(getattr(config, "meki_alpha", 1.0))))
+            self.meki_beta_scale = nn.Parameter(torch.tensor(float(getattr(config, "meki_beta", 1.0))))
 
     @deprecate_kwarg("past_key_value", new_name="past_key_values", version="4.58")
     def forward(
@@ -260,7 +280,8 @@ class Qwen3DecoderLayer(GradientCheckpointingLayer):
         use_cache: Optional[bool] = False,
         cache_position: Optional[torch.LongTensor] = None,
         position_embeddings: Optional[tuple[torch.Tensor, torch.Tensor]] = None,  # necessary, but kept here for BC
-        meki_input: Optional[torch.Tensor] = None,
+        input_ids_for_meki: Optional[torch.LongTensor] = None,
+        word_emb_for_meki: Optional[torch.Tensor] = None,
         **kwargs: Unpack[TransformersKwargs],
     ) -> torch.Tensor:
         residual = hidden_states
@@ -283,12 +304,17 @@ class Qwen3DecoderLayer(GradientCheckpointingLayer):
         hidden_states = self.post_attention_layernorm(hidden_states)
         pre_mlp_hidden_states = hidden_states
         hidden_states = self.mlp(hidden_states)
-        if self.use_meki and meki_input is not None:
-            meki_embedding = self.meki_mix_norm(meki_input)
+        if self.use_meki:
+            if input_ids_for_meki is None or word_emb_for_meki is None:
+                raise ValueError("MeKi is enabled but input_ids_for_meki/word_emb_for_meki is missing.")
+            static_embedding = self.meki_embeddings(input_ids_for_meki)
+            dynamic_embedding = self.meki_word_emb_projection(word_emb_for_meki)
+            meki_embedding = self.meki_mix_norm(static_embedding + dynamic_embedding * self.meki_beta_scale)
+            meki_embedding = meki_embedding * self.meki_alpha_scale
             meki_fused = torch.sigmoid(self.meki_gate_proj(pre_mlp_hidden_states)) + meki_embedding
             meki_output = self.meki_out_proj(meki_fused)
             meki_output = self.meki_post_norm(meki_output)
-            hidden_states = hidden_states + self.meki_alpha * meki_output
+            hidden_states = hidden_states + meki_output
         hidden_states = residual + hidden_states
         return hidden_states
 
@@ -356,30 +382,8 @@ class Qwen3Model(Qwen3PreTrainedModel):
         self.vocab_size = config.vocab_size
         self.meki_dim = int(getattr(config, "meki_dim", 0) or 0)
         self.use_meki = self.meki_dim > 0
-        self.meki_alpha = float(getattr(config, "meki_alpha", 1.0))
-        self.meki_beta = float(getattr(config, "meki_beta", 1.0))
 
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, self.padding_idx)
-        if self.use_meki:
-            self.embed_tokens_meki = nn.Embedding(
-                config.vocab_size,
-                config.num_hidden_layers * self.meki_dim,
-                self.padding_idx,
-            )
-            self.meki_model_projection = nn.Linear(
-                config.hidden_size,
-                config.num_hidden_layers * self.meki_dim,
-                bias=False,
-            )
-            self.meki_projection_norm = nn.LayerNorm(self.meki_dim, eps=config.rms_norm_eps)
-            self.meki_model_projection_scale = config.hidden_size**-0.5
-            self.meki_input_scale = 2.0**-0.5
-        else:
-            self.embed_tokens_meki = None
-            self.meki_model_projection = None
-            self.meki_projection_norm = None
-            self.meki_model_projection_scale = None
-            self.meki_input_scale = None
         self.layers = nn.ModuleList(
             [Qwen3DecoderLayer(config, layer_idx) for layer_idx in range(config.num_hidden_layers)]
         )
@@ -442,33 +446,13 @@ class Qwen3Model(Qwen3PreTrainedModel):
                 causal_mask_mapping["sliding_attention"] = create_sliding_window_causal_mask(**mask_kwargs)
 
         hidden_states = inputs_embeds
-        meki_layer_inputs = None
-        if self.use_meki:
-            if input_ids is None:
-                raise ValueError("MeKi is enabled but input_ids is None. MeKi token memory lookup requires input_ids.")
-            meki_token = self.embed_tokens_meki(input_ids).view(
-                input_ids.shape[0],
-                input_ids.shape[1],
-                self.config.num_hidden_layers,
-                self.meki_dim,
-            )
-            meki_context = self.meki_model_projection(inputs_embeds) * self.meki_model_projection_scale
-            meki_context = meki_context.view(
-                inputs_embeds.shape[0],
-                inputs_embeds.shape[1],
-                self.config.num_hidden_layers,
-                self.meki_dim,
-            )
-            meki_context = self.meki_projection_norm(meki_context)
-            meki_layer_inputs = (meki_token + self.meki_beta * meki_context) * self.meki_input_scale
+        if self.use_meki and input_ids is None:
+            raise ValueError("MeKi is enabled but input_ids is None. MeKi token memory lookup requires input_ids.")
 
         # create position embeddings to be shared across the decoder layers
         position_embeddings = self.rotary_emb(hidden_states, position_ids)
 
         for layer_idx, decoder_layer in enumerate(self.layers[: self.config.num_hidden_layers]):
-            meki_input = None
-            if meki_layer_inputs is not None:
-                meki_input = meki_layer_inputs[:, :, layer_idx, :]
             hidden_states = decoder_layer(
                 hidden_states,
                 attention_mask=causal_mask_mapping[decoder_layer.attention_type],
@@ -477,7 +461,8 @@ class Qwen3Model(Qwen3PreTrainedModel):
                 use_cache=use_cache,
                 cache_position=cache_position,
                 position_embeddings=position_embeddings,
-                meki_input=meki_input,
+                input_ids_for_meki=input_ids,
+                word_emb_for_meki=inputs_embeds,
                 **kwargs,
             )
 
