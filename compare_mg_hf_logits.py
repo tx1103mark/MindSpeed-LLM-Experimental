@@ -176,7 +176,7 @@ def main():
     hf_attention_mask = attention_mask.to(hf_device) if attention_mask is not None else None
 
     with torch.no_grad():
-        hf_logits = hf_model(input_ids=hf_input_ids, attention_mask=hf_attention_mask).logits
+        hf_logits = hf_model(input_ids=hf_input_ids, attention_mask=hf_attention_mask, use_cache=False).logits
 
     print(f"[INFO] MG logits shape={tuple(mg_logits.shape)} dtype={mg_logits.dtype}")
     print(f"[INFO] HF logits shape={tuple(hf_logits.shape)} dtype={hf_logits.dtype}")
@@ -229,6 +229,7 @@ def main():
                 input_ids=hf_input_ids,
                 attention_mask=hf_attention_mask,
                 do_sample=False,
+                use_cache=False,
                 max_new_tokens=cli_args.max_new_tokens,
                 pad_token_id=tokenizer.pad_token_id,
                 eos_token_id=tokenizer.eos_token_id,

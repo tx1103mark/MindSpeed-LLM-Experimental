@@ -572,6 +572,61 @@ class ModelBase(abc.ABC):
                     data=torch.zeros_like(bias),
                 )
 
+        # MeKi per-layer static memory + dynamic projection (demo-aligned path).
+        if hasattr(src_model, "has_layers_meki_embeddings_module") and \
+            hasattr(self, "has_layers_meki_embeddings_module") and \
+            src_model.has_layers_meki_embeddings_module(layer_idx=src_layer_idx) and \
+            self.has_layers_meki_embeddings_module(layer_idx=dst_layer_idx):
+            self.set_layers_meki_embeddings_weight(
+                layer_idx=dst_layer_idx,
+                data=src_model.get_layers_meki_embeddings_weight(layer_idx=src_layer_idx),
+            )
+
+        if hasattr(src_model, "has_layers_meki_word_gate_proj_module") and \
+            hasattr(self, "has_layers_meki_word_gate_proj_module") and \
+            src_model.has_layers_meki_word_gate_proj_module(layer_idx=src_layer_idx) and \
+            self.has_layers_meki_word_gate_proj_module(layer_idx=dst_layer_idx):
+            self.set_layers_meki_word_gate_proj_weight(
+                layer_idx=dst_layer_idx,
+                data=src_model.get_layers_meki_word_gate_proj_weight(layer_idx=src_layer_idx),
+            )
+
+        if hasattr(src_model, "has_layers_meki_word_up_proj_module") and \
+            hasattr(self, "has_layers_meki_word_up_proj_module") and \
+            src_model.has_layers_meki_word_up_proj_module(layer_idx=src_layer_idx) and \
+            self.has_layers_meki_word_up_proj_module(layer_idx=dst_layer_idx):
+            self.set_layers_meki_word_up_proj_weight(
+                layer_idx=dst_layer_idx,
+                data=src_model.get_layers_meki_word_up_proj_weight(layer_idx=src_layer_idx),
+            )
+
+        if hasattr(src_model, "has_layers_meki_word_down_proj_module") and \
+            hasattr(self, "has_layers_meki_word_down_proj_module") and \
+            src_model.has_layers_meki_word_down_proj_module(layer_idx=src_layer_idx) and \
+            self.has_layers_meki_word_down_proj_module(layer_idx=dst_layer_idx):
+            self.set_layers_meki_word_down_proj_weight(
+                layer_idx=dst_layer_idx,
+                data=src_model.get_layers_meki_word_down_proj_weight(layer_idx=src_layer_idx),
+            )
+
+        if hasattr(src_model, "has_layers_meki_alpha_scale_module") and \
+            hasattr(self, "has_layers_meki_alpha_scale_module") and \
+            src_model.has_layers_meki_alpha_scale_module(layer_idx=src_layer_idx) and \
+            self.has_layers_meki_alpha_scale_module(layer_idx=dst_layer_idx):
+            self.set_layers_meki_alpha_scale_weight(
+                layer_idx=dst_layer_idx,
+                data=src_model.get_layers_meki_alpha_scale_weight(layer_idx=src_layer_idx),
+            )
+
+        if hasattr(src_model, "has_layers_meki_beta_scale_module") and \
+            hasattr(self, "has_layers_meki_beta_scale_module") and \
+            src_model.has_layers_meki_beta_scale_module(layer_idx=src_layer_idx) and \
+            self.has_layers_meki_beta_scale_module(layer_idx=dst_layer_idx):
+            self.set_layers_meki_beta_scale_weight(
+                layer_idx=dst_layer_idx,
+                data=src_model.get_layers_meki_beta_scale_weight(layer_idx=src_layer_idx),
+            )
+
     def set_attn_state(self, src_layer_idx, dst_layer_idx, src_model):
         """Set self-attention params."""
         if self.args.save_lora_to_hf:
@@ -1554,14 +1609,43 @@ class MegatronModel(ModelBase):
         self.args.spec = self.args_cmd.spec
         self.args.save_lora_to_hf = self.args_cmd.save_lora_to_hf
         self.args.load_checkpoint_loosely = self.args_cmd.load_checkpoint_loosely
-        self.args.hidden_size_per_layer_input = getattr(self.args_cmd, 'hidden_size_per_layer_input', 0) or 0
-        self.args.vocab_size_per_layer_input = getattr(self.args_cmd, 'vocab_size_per_layer_input', None)
-        if self.args.vocab_size_per_layer_input is None:
-            self.args.vocab_size_per_layer_input = getattr(self.args, 'vocab_size', None)
-        self.args.ple_alpha = getattr(self.args_cmd, 'ple_alpha', 0.1)
-        self.args.meki_dim = getattr(self.args_cmd, 'meki_dim', 0) or 0
-        self.args.meki_alpha = getattr(self.args_cmd, 'meki_alpha', 1.0)
-        self.args.meki_beta = getattr(self.args_cmd, 'meki_beta', 1.0)
+        cmd_hspli = getattr(self.args_cmd, 'hidden_size_per_layer_input', 0) or 0
+        if cmd_hspli > 0:
+            self.args.hidden_size_per_layer_input = cmd_hspli
+        else:
+            self.args.hidden_size_per_layer_input = getattr(self.args, 'hidden_size_per_layer_input', 0) or 0
+
+        cmd_vspli = getattr(self.args_cmd, 'vocab_size_per_layer_input', None)
+        if cmd_vspli is not None and int(cmd_vspli) > 0:
+            self.args.vocab_size_per_layer_input = int(cmd_vspli)
+        else:
+            self.args.vocab_size_per_layer_input = getattr(
+                self.args, 'vocab_size_per_layer_input', getattr(self.args, 'vocab_size', None)
+            )
+
+        cmd_ple_alpha = getattr(self.args_cmd, 'ple_alpha', None)
+        if cmd_ple_alpha is not None and float(cmd_ple_alpha) != 0.1:
+            self.args.ple_alpha = float(cmd_ple_alpha)
+        else:
+            self.args.ple_alpha = getattr(self.args, 'ple_alpha', 0.1)
+
+        cmd_meki_dim = getattr(self.args_cmd, 'meki_dim', 0) or 0
+        if cmd_meki_dim > 0:
+            self.args.meki_dim = cmd_meki_dim
+        else:
+            self.args.meki_dim = getattr(self.args, 'meki_dim', 0) or 0
+
+        cmd_meki_alpha = getattr(self.args_cmd, 'meki_alpha', None)
+        if cmd_meki_alpha is not None and float(cmd_meki_alpha) != 1.0:
+            self.args.meki_alpha = float(cmd_meki_alpha)
+        else:
+            self.args.meki_alpha = getattr(self.args, 'meki_alpha', 1.0)
+
+        cmd_meki_beta = getattr(self.args_cmd, 'meki_beta', None)
+        if cmd_meki_beta is not None and float(cmd_meki_beta) != 1.0:
+            self.args.meki_beta = float(cmd_meki_beta)
+        else:
+            self.args.meki_beta = getattr(self.args, 'meki_beta', 1.0)
         self.args.tokenizer_model = getattr(self.args_cmd, 'tokenizer_model', None)
         self.args.make_vocab_size_divisible_by = getattr(self.args_cmd, 'make_vocab_size_divisible_by', None)
         if self.args_cmd.params_dtype == 'bf16':
