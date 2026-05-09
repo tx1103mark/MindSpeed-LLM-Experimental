@@ -96,7 +96,12 @@ class ModelBase(abc.ABC):
 
         def _func_generator_get_weight(value):
             def func(self, **kwargs):
-                return _get_src_obj(self, value, **kwargs).weight.data
+                obj = _get_src_obj(self, value, **kwargs)
+                if hasattr(obj, "weight"):
+                    return obj.weight.data
+                if isinstance(obj, torch.nn.Parameter) or torch.is_tensor(obj):
+                    return obj.data
+                raise AttributeError(f"Object at '{value}' has no weight/data attribute: {type(obj)}")
             return func
 
         def _func_generator_get_bias(value):
@@ -106,7 +111,13 @@ class ModelBase(abc.ABC):
 
         def _func_generator_set_weight(value):
             def func(self, **kwargs):
-                return _get_dst_obj(self, value, **kwargs).weight.data.copy_(kwargs.get('data'))
+                obj = _get_dst_obj(self, value, **kwargs)
+                data = kwargs.get('data')
+                if hasattr(obj, "weight"):
+                    return obj.weight.data.copy_(data)
+                if isinstance(obj, torch.nn.Parameter) or torch.is_tensor(obj):
+                    return obj.data.copy_(data)
+                raise AttributeError(f"Object at '{value}' has no weight/data attribute: {type(obj)}")
             return func
 
         def _func_generator_set_module(value):
