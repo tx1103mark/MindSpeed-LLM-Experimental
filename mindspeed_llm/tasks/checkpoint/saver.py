@@ -246,6 +246,12 @@ def set_model_layer_norm(model_mg, msg, md, **kwargs):
     meki_mix_norm_b = msg.pop("meki mix norm bias") if "meki mix norm bias" in msg else None
     meki_post_norm_w = msg.pop("meki post norm weight") if "meki post norm weight" in msg else None
     meki_post_norm_b = msg.pop("meki post norm bias") if "meki post norm bias" in msg else None
+    meki_embeddings_w = msg.pop("meki embeddings weight") if "meki embeddings weight" in msg else None
+    meki_word_gate_w = msg.pop("meki word gate proj weight") if "meki word gate proj weight" in msg else None
+    meki_word_up_w = msg.pop("meki word up proj weight") if "meki word up proj weight" in msg else None
+    meki_word_down_w = msg.pop("meki word down proj weight") if "meki word down proj weight" in msg else None
+    meki_alpha_scale = msg.pop("meki alpha scale") if "meki alpha scale" in msg else None
+    meki_beta_scale = msg.pop("meki beta scale") if "meki beta scale" in msg else None
     # Save them to the model
     for ep_rank in range(margs.expert_model_parallel_size):
         kwargs["ep_rank"] = ep_rank
@@ -311,6 +317,30 @@ def set_model_layer_norm(model_mg, msg, md, **kwargs):
                 if meki_post_norm_b is not None and hasattr(model_mg, "has_layers_meki_post_norm_bias") and \
                     model_mg.has_layers_meki_post_norm_bias(**kwargs):
                     model_mg.set_layers_meki_post_norm_bias(**kwargs, data=meki_post_norm_b)
+
+            if meki_embeddings_w is not None and hasattr(model_mg, "has_layers_meki_embeddings_module") and \
+                model_mg.has_layers_meki_embeddings_module(**kwargs):
+                model_mg.set_layers_meki_embeddings_weight(**kwargs, data=meki_embeddings_w)
+
+            if meki_word_gate_w is not None and hasattr(model_mg, "has_layers_meki_word_gate_proj_module") and \
+                model_mg.has_layers_meki_word_gate_proj_module(**kwargs):
+                model_mg.set_layers_meki_word_gate_proj_weight(**kwargs, data=meki_word_gate_w)
+
+            if meki_word_up_w is not None and hasattr(model_mg, "has_layers_meki_word_up_proj_module") and \
+                model_mg.has_layers_meki_word_up_proj_module(**kwargs):
+                model_mg.set_layers_meki_word_up_proj_weight(**kwargs, data=meki_word_up_w)
+
+            if meki_word_down_w is not None and hasattr(model_mg, "has_layers_meki_word_down_proj_module") and \
+                model_mg.has_layers_meki_word_down_proj_module(**kwargs):
+                model_mg.set_layers_meki_word_down_proj_weight(**kwargs, data=meki_word_down_w)
+
+            if meki_alpha_scale is not None and hasattr(model_mg, "has_layers_meki_alpha_scale_module") and \
+                model_mg.has_layers_meki_alpha_scale_module(**kwargs):
+                model_mg.set_layers_meki_alpha_scale_weight(**kwargs, data=meki_alpha_scale)
+
+            if meki_beta_scale is not None and hasattr(model_mg, "has_layers_meki_beta_scale_module") and \
+                model_mg.has_layers_meki_beta_scale_module(**kwargs):
+                model_mg.set_layers_meki_beta_scale_weight(**kwargs, data=meki_beta_scale)
 
 
 def set_model_layer_attn(model_mg, msg, md, **kwargs):

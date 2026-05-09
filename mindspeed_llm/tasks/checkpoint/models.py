@@ -133,7 +133,7 @@ class ModelBase(abc.ABC):
         def _func_generator_has_module(value):
             def func(self, **kwargs):
                 obj = _get_src_obj(self, value, **kwargs)
-                return True if obj else False
+                return obj is not None
             return func
 
         def _func_generator_has_bias(value):

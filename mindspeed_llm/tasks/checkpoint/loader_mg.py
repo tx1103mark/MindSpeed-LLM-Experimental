@@ -62,6 +62,8 @@ def add_arguments(parser):
                        help='Per-layer embedding hidden size (PLE). 0 disables PLE.')
     group.add_argument('--vocab-size-per-layer-input', type=int, default=None,
                        help='Vocabulary size for per-layer embeddings (PLE). Defaults to vocab size when unset.')
+    group.add_argument('--ple-alpha', type=float, default=0.1,
+                       help='Residual scaling factor for PLE injection.')
     group.add_argument('--meki-dim', type=int, default=0,
                        help='MeKi memory dimension. 0 disables MeKi.')
     group.add_argument('--meki-alpha', type=float, default=1.0,
@@ -116,6 +118,7 @@ def build_metadata(args, margs):
     md.moe_layer_freq = getattr(margs, "moe_layer_freq", None)
     md.q_lora_rank = getattr(margs, "q_lora_rank", None)
     md.multi_latent_attention = getattr(margs, "multi_latent_attention", False)
+    md.ple_alpha = getattr(margs, "ple_alpha", 0.1)
     md.meki_dim = getattr(margs, "meki_dim", 0)
     md.meki_alpha = getattr(margs, "meki_alpha", 1.0)
     md.meki_beta = getattr(margs, "meki_beta", 1.0)
@@ -246,6 +249,24 @@ def get_message_layer_norm(message, model, md, **kwargs):
         if hasattr(model, "has_layers_meki_post_norm_bias") and \
             model.has_layers_meki_post_norm_bias(**kwargs):
             message["meki post norm bias"] = model.get_layers_meki_post_norm_bias(**kwargs)
+    if hasattr(model, "has_layers_meki_embeddings_module") and \
+        model.has_layers_meki_embeddings_module(**kwargs):
+        message["meki embeddings weight"] = model.get_layers_meki_embeddings_weight(**kwargs)
+    if hasattr(model, "has_layers_meki_word_gate_proj_module") and \
+        model.has_layers_meki_word_gate_proj_module(**kwargs):
+        message["meki word gate proj weight"] = model.get_layers_meki_word_gate_proj_weight(**kwargs)
+    if hasattr(model, "has_layers_meki_word_up_proj_module") and \
+        model.has_layers_meki_word_up_proj_module(**kwargs):
+        message["meki word up proj weight"] = model.get_layers_meki_word_up_proj_weight(**kwargs)
+    if hasattr(model, "has_layers_meki_word_down_proj_module") and \
+        model.has_layers_meki_word_down_proj_module(**kwargs):
+        message["meki word down proj weight"] = model.get_layers_meki_word_down_proj_weight(**kwargs)
+    if hasattr(model, "has_layers_meki_alpha_scale_module") and \
+        model.has_layers_meki_alpha_scale_module(**kwargs):
+        message["meki alpha scale"] = model.get_layers_meki_alpha_scale_weight(**kwargs)
+    if hasattr(model, "has_layers_meki_beta_scale_module") and \
+        model.has_layers_meki_beta_scale_module(**kwargs):
+        message["meki beta scale"] = model.get_layers_meki_beta_scale_weight(**kwargs)
 
     return message
 
