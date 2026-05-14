@@ -255,6 +255,7 @@ class Qwen3DecoderLayer(GradientCheckpointingLayer):
         self.attention_type = config.layer_types[layer_idx]
         self.meki_dim = int(getattr(config, "meki_dim", 0) or 0)
         self.use_meki = self.meki_dim > 0
+        self.meki_fusion_mode = str(getattr(config, "meki_fusion_mode", "ple_gelu_mul")).lower()
         if self.use_meki:
             self.meki_gate_proj = nn.Linear(config.hidden_size, self.meki_dim, bias=False)
             self.meki_out_proj = nn.Linear(self.meki_dim, config.hidden_size, bias=False)
@@ -311,7 +312,12 @@ class Qwen3DecoderLayer(GradientCheckpointingLayer):
             dynamic_embedding = self.meki_word_emb_projection(word_emb_for_meki)
             meki_embedding = self.meki_mix_norm(static_embedding + dynamic_embedding * self.meki_beta_scale)
             meki_embedding = meki_embedding * self.meki_alpha_scale
-            meki_fused = torch.sigmoid(self.meki_gate_proj(pre_mlp_hidden_states)) + meki_embedding
+            if self.meki_fusion_mode == "meki_sigmoid_add":
+                meki_gate = torch.sigmoid(self.meki_gate_proj(pre_mlp_hidden_states))
+                meki_fused = meki_gate + meki_embedding
+            else:
+                meki_gate = ACT2FN["gelu"](self.meki_gate_proj(pre_mlp_hidden_states))
+                meki_fused = meki_gate * meki_embedding
             meki_output = self.meki_out_proj(meki_fused)
             meki_output = self.meki_post_norm(meki_output)
             hidden_states = hidden_states + meki_output

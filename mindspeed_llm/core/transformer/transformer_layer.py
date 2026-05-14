@@ -32,6 +32,37 @@ from megatron.core.utils import make_viewless_tensor
 from megatron.training import get_args
 
 
+_MEKI_GATE_STATS = {}
+
+
+def record_meki_gate_stats(layer_number: int, gate: Tensor):
+    """Collect detached MeKi gate scalar stats for training-time logging."""
+    if gate.numel() == 0:
+        return
+    with torch.no_grad():
+        gate = gate.detach().float()
+        layer_stats = _MEKI_GATE_STATS.setdefault(
+            int(layer_number),
+            {"mean": [], "std": [], "min": [], "max": []},
+        )
+        layer_stats["mean"].append(gate.mean())
+        layer_stats["std"].append(gate.std(unbiased=False))
+        layer_stats["min"].append(gate.min())
+        layer_stats["max"].append(gate.max())
+
+
+def pop_meki_gate_stats():
+    """Return averaged MeKi gate stats and clear the collection buffer."""
+    stats = {}
+    for layer_number, layer_stats in _MEKI_GATE_STATS.items():
+        stats[layer_number] = {}
+        for name, values in layer_stats.items():
+            if values:
+                stats[layer_number][name] = torch.stack(values).mean().item()
+    _MEKI_GATE_STATS.clear()
+    return stats
+
+
 class TransformerLayer(MegatronTransformerLayer):
     """
     Inherited from megatron TransformerLayer.
@@ -74,6 +105,7 @@ class TransformerLayer(MegatronTransformerLayer):
 
         self.meki_dim = int(getattr(config, "meki_dim", 0) or 0)
         self.use_meki = self.meki_dim > 0
+        self.meki_fusion_mode = str(getattr(config, "meki_fusion_mode", "ple_gelu_mul")).lower()
         self._meki_input = None
         self._meki_input_ids = None
         self._meki_word_emb = None
@@ -255,7 +287,13 @@ class TransformerLayer(MegatronTransformerLayer):
             if self._meki_input is not None:
                 meki_embedding = self.meki_mix_norm(self._meki_input + dynamic_embedding * self.meki_beta_scale)
                 meki_embedding = meki_embedding * self.meki_alpha_scale
-            meki_fused = torch.sigmoid(self.meki_gate_proj(pre_mlp_layernorm_output)) + meki_embedding
+            if self.meki_fusion_mode == "meki_sigmoid_add":
+                meki_gate = torch.sigmoid(self.meki_gate_proj(pre_mlp_layernorm_output))
+                meki_fused = meki_gate + meki_embedding
+            else:
+                meki_gate = F.gelu(self.meki_gate_proj(pre_mlp_layernorm_output))
+                meki_fused = meki_gate * meki_embedding
+            record_meki_gate_stats(self.layer_number, meki_gate)
             meki_output = self.meki_out_proj(meki_fused)
             meki_output = self.meki_post_norm(meki_output)
             mlp_output_with_bias = (

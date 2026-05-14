@@ -144,7 +144,8 @@
         "ple_alpha": "ple_alpha",
         "meki_dim": "meki_dim",
         "meki_alpha": "meki_alpha",
-        "meki_beta": "meki_beta"
+        "meki_beta": "meki_beta",
+        "meki_fusion_mode": "meki_fusion_mode"
       },
       "model_hf_key_mapping": {
         "model": "module[0]",

@@ -44,6 +44,16 @@ class LanguageModelEmbeddingFeature(MindSpeedFeature):
             default=1.0,
             help="Scaling factor for MeKi context projection before fusion with memory lookup.",
         )
+        group.add_argument(
+            "--meki-fusion-mode",
+            type=str,
+            default="ple_gelu_mul",
+            choices=["ple_gelu_mul", "meki_sigmoid_add"],
+            help=(
+                "MeKi fusion mode: ple_gelu_mul uses GELU(gate) * memory; "
+                "meki_sigmoid_add uses original sigmoid(gate) + memory."
+            ),
+        )
 
     def register_patches(self, patch_manager, args):
         from mindspeed.core.models.common.embeddings.language_model_embedding import language_model_embedding_forward_wrapper

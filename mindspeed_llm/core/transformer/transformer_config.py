@@ -93,4 +93,6 @@ def transformer_config_post_init_wrapper(fn):
             setattr(self, "meki_alpha", 1.0)
         if not hasattr(self, "meki_beta"):
             setattr(self, "meki_beta", 1.0)
+        if not hasattr(self, "meki_fusion_mode"):
+            setattr(self, "meki_fusion_mode", "ple_gelu_mul")
     return wrapper

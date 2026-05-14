@@ -28,6 +28,7 @@ ROUTER_BALANCING_TYPE='softmax_topk'
 MEKI_DIM=256
 MEKI_ALPHA=1.0
 MEKI_BETA=1.0
+MEKI_FUSION_MODE=ple_gelu_mul
 
 DISTRIBUTED_ARGS="
     --nproc_per_node $NPUS_PER_NODE \
@@ -120,7 +121,8 @@ OUTPUT_ARGS="
 MEKI_ARGS="
     --meki-dim ${MEKI_DIM} \
     --meki-alpha ${MEKI_ALPHA} \
-    --meki-beta ${MEKI_BETA}
+    --meki-beta ${MEKI_BETA} \
+    --meki-fusion-mode ${MEKI_FUSION_MODE}
 "
 
 torchrun $DISTRIBUTED_ARGS pretrain_gpt.py \

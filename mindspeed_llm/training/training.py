@@ -68,6 +68,7 @@ from megatron.core.distributed import finalize_model_grads
 from mindspeed_llm.tasks.models.transformer.dsa_indexer import DSAIndexerLossLoggingHelper
 from mindspeed_llm.training.initialize import set_jit_fusion_options
 from mindspeed_llm.tasks.posttrain.lora.utils import is_enable_lora
+from mindspeed_llm.core.transformer.transformer_layer import pop_meki_gate_stats
 from mindspeed_llm.training.utils import get_actual_attn_ratio, clear_actual_attn_ratio, is_distributed_ckpt_complete
 from mindspeed_llm.training.checkpointing import _convert_weights_mg2hf
 
@@ -1004,7 +1005,13 @@ def training_log(loss_dict, total_loss_dict, learning_rate, decoupled_learning_r
        (iteration % args.tensorboard_log_interval == 0):
         timers.write(timers_to_log, writer, iteration,
                      normalizer=total_iterations)
+    meki_gate_stats = {}
+    if iteration % args.tensorboard_log_interval == 0:
+        meki_gate_stats = pop_meki_gate_stats()
     if writer and (iteration % args.tensorboard_log_interval == 0):
+        for layer_number, gate_stats in meki_gate_stats.items():
+            for stat_name, stat_value in gate_stats.items():
+                writer.add_scalar(f'meki/gate/layer_{layer_number}/{stat_name}', stat_value, iteration)
         if wandb_writer:
             wandb_writer.log({'samples vs steps': args.consumed_train_samples},
                              iteration)
