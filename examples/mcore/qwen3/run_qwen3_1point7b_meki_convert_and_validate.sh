@@ -45,6 +45,8 @@ PADDED_VOCAB_SIZE=151936
 MEKI_DIM=256
 MEKI_ALPHA=1.0
 MEKI_BETA=1.0
+MEKI_FUSION_MODE=ple_gelu_mul   # choices: ple_gelu_mul | meki_sigmoid_add
+HF_MODEL_TYPE=qwen3_meki
 
 # Optional PLE fields (set >0 only if enabled in training).
 HIDDEN_SIZE_PER_LAYER_INPUT=0
@@ -94,7 +96,8 @@ COMMON_MG_ARGS="
   --ckpt-format torch \
   --meki-dim ${MEKI_DIM} \
   --meki-alpha ${MEKI_ALPHA} \
-  --meki-beta ${MEKI_BETA}
+  --meki-beta ${MEKI_BETA} \
+  --meki-fusion-mode ${MEKI_FUSION_MODE}
 "
 
 if [ "${HIDDEN_SIZE_PER_LAYER_INPUT}" -gt 0 ]; then
@@ -115,6 +118,51 @@ fi
 if [ "${RUN_CONVERT}" -eq 1 ]; then
   echo "[STEP 1/3] Converting MG(MeKi) -> HF ..."
   mkdir -p "${HF_WORK_DIR}"
+
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
+  cp -f "${REPO_ROOT}/modeling_qwen3.py" "${HF_WORK_DIR}/modeling_qwen3.py"
+  cp -f "${REPO_ROOT}/configuration_qwen3.py" "${HF_WORK_DIR}/configuration_qwen3.py"
+  python - <<PY
+from pathlib import Path
+
+config_py = Path("${HF_WORK_DIR}") / "configuration_qwen3.py"
+text = config_py.read_text(encoding="utf-8")
+text = text.replace('model_type = "qwen3"', 'model_type = "${HF_MODEL_TYPE}"')
+config_py.write_text(text, encoding="utf-8")
+print("Prepared remote-code files and patched model_type:", "${HF_MODEL_TYPE}")
+PY
+
+  python - <<PY
+import json
+from pathlib import Path
+
+cfg_path = Path("${HF_WORK_DIR}") / "config.json"
+if not cfg_path.exists():
+    raise FileNotFoundError(f"Missing template config.json: {cfg_path}")
+
+cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+cfg["model_type"] = "${HF_MODEL_TYPE}"
+cfg["architectures"] = ["Qwen3ForCausalLM"]
+cfg["meki_dim"] = int(${MEKI_DIM})
+cfg["meki_alpha"] = float(${MEKI_ALPHA})
+cfg["meki_beta"] = float(${MEKI_BETA})
+cfg["meki_fusion_mode"] = "${MEKI_FUSION_MODE}"
+auto_map = cfg.get("auto_map", {})
+auto_map["AutoConfig"] = "configuration_qwen3.Qwen3Config"
+auto_map["AutoModel"] = "modeling_qwen3.Qwen3Model"
+auto_map["AutoModelForCausalLM"] = "modeling_qwen3.Qwen3ForCausalLM"
+cfg["auto_map"] = auto_map
+if int(${HIDDEN_SIZE_PER_LAYER_INPUT}) > 0:
+    cfg["hidden_size_per_layer_input"] = int(${HIDDEN_SIZE_PER_LAYER_INPUT})
+if int(${VOCAB_SIZE_PER_LAYER_INPUT}) > 0:
+    cfg["vocab_size_per_layer_input"] = int(${VOCAB_SIZE_PER_LAYER_INPUT})
+cfg_path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+print("Patched template config:", cfg_path)
+print("model_type =", cfg["model_type"], "meki_fusion_mode =", cfg["meki_fusion_mode"])
+print("auto_map =", cfg["auto_map"])
+PY
+
   python convert_ckpt.py \
       --use-mcore-models \
       --model-type GPT \
@@ -138,19 +186,42 @@ if [ "${RUN_CONVERT}" -eq 1 ]; then
 import json
 from pathlib import Path
 
+out_dir = Path("${HF_OUTPUT_DIR}")
+out_dir.mkdir(parents=True, exist_ok=True)
+for name in ("modeling_qwen3.py", "configuration_qwen3.py"):
+    src = Path("${HF_WORK_DIR}") / name
+    dst = out_dir / name
+    if src.exists():
+        dst.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+config_py = out_dir / "configuration_qwen3.py"
+if config_py.exists():
+    text = config_py.read_text(encoding="utf-8")
+    text = text.replace('model_type = "qwen3"', 'model_type = "${HF_MODEL_TYPE}"')
+    config_py.write_text(text, encoding="utf-8")
+
 cfg_path = Path("${HF_OUTPUT_DIR}") / "config.json"
 if not cfg_path.exists():
     raise FileNotFoundError(f"Missing config.json: {cfg_path}")
 cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+cfg["model_type"] = "${HF_MODEL_TYPE}"
+cfg["architectures"] = ["Qwen3ForCausalLM"]
 cfg["meki_dim"] = int(${MEKI_DIM})
 cfg["meki_alpha"] = float(${MEKI_ALPHA})
 cfg["meki_beta"] = float(${MEKI_BETA})
+cfg["meki_fusion_mode"] = "${MEKI_FUSION_MODE}"
+auto_map = cfg.get("auto_map", {})
+auto_map["AutoConfig"] = "configuration_qwen3.Qwen3Config"
+auto_map["AutoModel"] = "modeling_qwen3.Qwen3Model"
+auto_map["AutoModelForCausalLM"] = "modeling_qwen3.Qwen3ForCausalLM"
+cfg["auto_map"] = auto_map
 if int(${HIDDEN_SIZE_PER_LAYER_INPUT}) > 0:
     cfg["hidden_size_per_layer_input"] = int(${HIDDEN_SIZE_PER_LAYER_INPUT})
 if int(${VOCAB_SIZE_PER_LAYER_INPUT}) > 0:
     cfg["vocab_size_per_layer_input"] = int(${VOCAB_SIZE_PER_LAYER_INPUT})
 cfg_path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 print("Updated config:", cfg_path)
+print("model_type =", cfg["model_type"], "meki_fusion_mode =", cfg["meki_fusion_mode"])
+print("auto_map =", cfg["auto_map"])
 PY
 fi
 
