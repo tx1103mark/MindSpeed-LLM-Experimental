@@ -33,6 +33,21 @@ VOCAB_SIZE_PER_LAYER_INPUT=0
 
 mkdir -p "${HF_WORK_DIR}"
 
+# Ensure custom Qwen3 remote-code files exist in HF_WORK_DIR for MeKi loading.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
+SRC_MODELING_QWEN3="${REPO_ROOT}/modeling_qwen3.py"
+SRC_CONFIG_QWEN3="${REPO_ROOT}/configuration_qwen3.py"
+if [ ! -f "${SRC_MODELING_QWEN3}" ] || [ ! -f "${SRC_CONFIG_QWEN3}" ]; then
+  echo "ERROR: Missing source remote-code files in repo root:"
+  echo "  ${SRC_MODELING_QWEN3}"
+  echo "  ${SRC_CONFIG_QWEN3}"
+  exit 1
+fi
+cp -f "${SRC_MODELING_QWEN3}" "${HF_WORK_DIR}/modeling_qwen3.py"
+cp -f "${SRC_CONFIG_QWEN3}" "${HF_WORK_DIR}/configuration_qwen3.py"
+echo "Prepared remote-code files in ${HF_WORK_DIR}"
+
 EXTRA_PLE_ARGS=""
 if [ "${HIDDEN_SIZE_PER_LAYER_INPUT}" -gt 0 ]; then
   EXTRA_PLE_ARGS="${EXTRA_PLE_ARGS} --hidden-size-per-layer-input ${HIDDEN_SIZE_PER_LAYER_INPUT}"
@@ -57,6 +72,11 @@ cfg["meki_dim"] = int(${MEKI_DIM})
 cfg["meki_alpha"] = float(${MEKI_ALPHA})
 cfg["meki_beta"] = float(${MEKI_BETA})
 cfg["meki_fusion_mode"] = "${MEKI_FUSION_MODE}"
+auto_map = cfg.get("auto_map", {})
+auto_map["AutoConfig"] = "configuration_qwen3.Qwen3Config"
+auto_map["AutoModel"] = "modeling_qwen3.Qwen3Model"
+auto_map["AutoModelForCausalLM"] = "modeling_qwen3.Qwen3ForCausalLM"
+cfg["auto_map"] = auto_map
 
 if int(${HIDDEN_SIZE_PER_LAYER_INPUT}) > 0:
     cfg["hidden_size_per_layer_input"] = int(${HIDDEN_SIZE_PER_LAYER_INPUT})
@@ -70,6 +90,7 @@ print(
     "meki_alpha =", cfg["meki_alpha"],
     "meki_beta =", cfg["meki_beta"],
     "meki_fusion_mode =", cfg["meki_fusion_mode"],
+    "auto_map =", cfg["auto_map"],
 )
 PY
 
@@ -88,7 +109,6 @@ python convert_ckpt.py \
     --meki-dim "${MEKI_DIM}" \
     --meki-alpha "${MEKI_ALPHA}" \
     --meki-beta "${MEKI_BETA}" \
-    --meki-fusion-mode "${MEKI_FUSION_MODE}" \
     ${EXTRA_PLE_ARGS} \
     --load-dir "${CKPT_LOAD_DIR}" \
     --save-dir "${HF_WORK_DIR}"
@@ -107,6 +127,11 @@ cfg["meki_dim"] = int(${MEKI_DIM})
 cfg["meki_alpha"] = float(${MEKI_ALPHA})
 cfg["meki_beta"] = float(${MEKI_BETA})
 cfg["meki_fusion_mode"] = "${MEKI_FUSION_MODE}"
+auto_map = cfg.get("auto_map", {})
+auto_map["AutoConfig"] = "configuration_qwen3.Qwen3Config"
+auto_map["AutoModel"] = "modeling_qwen3.Qwen3Model"
+auto_map["AutoModelForCausalLM"] = "modeling_qwen3.Qwen3ForCausalLM"
+cfg["auto_map"] = auto_map
 
 if int(${HIDDEN_SIZE_PER_LAYER_INPUT}) > 0:
     cfg["hidden_size_per_layer_input"] = int(${HIDDEN_SIZE_PER_LAYER_INPUT})
@@ -120,6 +145,7 @@ print(
     "meki_alpha =", cfg["meki_alpha"],
     "meki_beta =", cfg["meki_beta"],
     "meki_fusion_mode =", cfg["meki_fusion_mode"],
+    "auto_map =", cfg["auto_map"],
 )
 PY
 
