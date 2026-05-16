@@ -1,10 +1,11 @@
 # Copyright (c) 2024, HUAWEI CORPORATION.  All rights reserved.
 import abc
+import importlib.util
 import os
 import sys
 import re
 import json
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 import logging as logger
 from pathlib import Path
 from collections import OrderedDict
@@ -977,15 +978,48 @@ class HuggingfaceModel(ModelBase):
         _rewrite_file(os.path.join(load_dir, "configuration_qwen3.py"))
         _rewrite_file(os.path.join(load_dir, "modeling_qwen3.py"))
 
+    def _has_meki_modules(self, hf_model):
+        model_obj = getattr(hf_model, "model", None)
+        layers = getattr(model_obj, "layers", None)
+        return layers is not None and len(layers) > 0 and hasattr(layers[0], "meki_embeddings")
+
+    def _load_qwen3_meki_model_from_local_code(self, config, load_dir):
+        model_py = os.path.join(load_dir, "modeling_qwen3.py")
+        config_py = os.path.join(load_dir, "configuration_qwen3.py")
+        if not (os.path.exists(model_py) and os.path.exists(config_py)):
+            raise FileNotFoundError(
+                "Missing local qwen3 remote-code files required for MeKi: "
+                f"{model_py}, {config_py}"
+            )
+
+        package_name = f"_mindspeed_qwen3_remote_{abs(hash(os.path.abspath(load_dir)))}"
+        if package_name not in sys.modules:
+            package = ModuleType(package_name)
+            package.__path__ = [load_dir]
+            sys.modules[package_name] = package
+
+        config_module_name = f"{package_name}.configuration_qwen3"
+        if config_module_name not in sys.modules:
+            spec = importlib.util.spec_from_file_location(config_module_name, config_py)
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[config_module_name] = module
+            spec.loader.exec_module(module)
+
+        modeling_module_name = f"{package_name}.modeling_qwen3"
+        spec = importlib.util.spec_from_file_location(modeling_module_name, model_py)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[modeling_module_name] = module
+        spec.loader.exec_module(module)
+
+        logger.info(f"[INFO] Falling back to local qwen3 remote-code model from {model_py}")
+        return module.Qwen3ForCausalLM(config)
+
     def _assert_meki_modules_loaded(self, hf_model):
         if self.args_cmd.model_type_hf != "qwen3":
             return
         if int(getattr(self.args_cmd, "meki_dim", 0) or 0) <= 0:
             return
-        model_obj = getattr(hf_model, "model", None)
-        layers = getattr(model_obj, "layers", None)
-        has_meki = layers is not None and len(layers) > 0 and hasattr(layers[0], "meki_embeddings")
-        if not has_meki:
+        if not self._has_meki_modules(hf_model):
             raise AssertionError(
                 "MeKi is enabled (meki_dim>0) but loaded HF qwen3 model does not contain MeKi modules. "
                 "Please ensure save_dir contains custom modeling_qwen3.py/configuration_qwen3.py and config.json "
@@ -1000,6 +1034,12 @@ class HuggingfaceModel(ModelBase):
         config = AutoConfig.from_pretrained(load_dir, trust_remote_code=trust_remote_code)
         with torch.device("meta"):
             hf_model = AutoModelForCausalLM.from_config(config, trust_remote_code=trust_remote_code)
+            if (
+                self.args_cmd.model_type_hf == "qwen3"
+                and int(getattr(self.args_cmd, "meki_dim", 0) or 0) > 0
+                and not self._has_meki_modules(hf_model)
+            ):
+                hf_model = self._load_qwen3_meki_model_from_local_code(config, load_dir)
         hf_model.to_empty(device=device_map)
         self._assert_meki_modules_loaded(hf_model)
         self.module = [hf_model]

@@ -26,6 +26,7 @@ MEKI_DIM=256
 MEKI_ALPHA=1.0
 MEKI_BETA=1.0
 MEKI_FUSION_MODE=ple_gelu_mul   # choices: ple_gelu_mul | meki_sigmoid_add
+HF_MODEL_TYPE=qwen3_meki
 
 # Optional: if you enabled PLE in training, set these as well.
 HIDDEN_SIZE_PER_LAYER_INPUT=0
@@ -48,6 +49,16 @@ cp -f "${SRC_MODELING_QWEN3}" "${HF_WORK_DIR}/modeling_qwen3.py"
 cp -f "${SRC_CONFIG_QWEN3}" "${HF_WORK_DIR}/configuration_qwen3.py"
 echo "Prepared remote-code files in ${HF_WORK_DIR}"
 
+python - <<PY
+from pathlib import Path
+
+config_py = Path("${HF_WORK_DIR}") / "configuration_qwen3.py"
+text = config_py.read_text(encoding="utf-8")
+text = text.replace('model_type = "qwen3"', 'model_type = "${HF_MODEL_TYPE}"')
+config_py.write_text(text, encoding="utf-8")
+print("Patched remote Qwen3Config.model_type =", "${HF_MODEL_TYPE}")
+PY
+
 EXTRA_PLE_ARGS=""
 if [ "${HIDDEN_SIZE_PER_LAYER_INPUT}" -gt 0 ]; then
   EXTRA_PLE_ARGS="${EXTRA_PLE_ARGS} --hidden-size-per-layer-input ${HIDDEN_SIZE_PER_LAYER_INPUT}"
@@ -68,6 +79,8 @@ if not cfg_path.exists():
     raise FileNotFoundError(f"Missing template config.json: {cfg_path}")
 
 cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+cfg["model_type"] = "${HF_MODEL_TYPE}"
+cfg["architectures"] = ["Qwen3ForCausalLM"]
 cfg["meki_dim"] = int(${MEKI_DIM})
 cfg["meki_alpha"] = float(${MEKI_ALPHA})
 cfg["meki_beta"] = float(${MEKI_BETA})
@@ -86,6 +99,7 @@ if int(${VOCAB_SIZE_PER_LAYER_INPUT}) > 0:
 cfg_path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 print("Patched template config before convert:", cfg_path)
 print(
+    "model_type =", cfg["model_type"],
     "meki_dim =", cfg["meki_dim"],
     "meki_alpha =", cfg["meki_alpha"],
     "meki_beta =", cfg["meki_beta"],
@@ -123,6 +137,8 @@ if not cfg_path.exists():
     raise FileNotFoundError(f"Missing config.json: {cfg_path}")
 
 cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+cfg["model_type"] = "${HF_MODEL_TYPE}"
+cfg["architectures"] = ["Qwen3ForCausalLM"]
 cfg["meki_dim"] = int(${MEKI_DIM})
 cfg["meki_alpha"] = float(${MEKI_ALPHA})
 cfg["meki_beta"] = float(${MEKI_BETA})
@@ -141,6 +157,7 @@ if int(${VOCAB_SIZE_PER_LAYER_INPUT}) > 0:
 cfg_path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 print("Updated:", cfg_path)
 print(
+    "model_type =", cfg["model_type"],
     "meki_dim =", cfg["meki_dim"],
     "meki_alpha =", cfg["meki_alpha"],
     "meki_beta =", cfg["meki_beta"],
